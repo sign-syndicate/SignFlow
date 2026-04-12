@@ -4,12 +4,6 @@ SignFlow converts sign language into English captions in real time using a low-l
 
 ---
 
-## Demo
-
-![Demo](documents/demo.gif)
-
----
-
 ## How it works
 
 Pipeline:
@@ -29,4 +23,4 @@ git clone https://github.com/sign-syndicate/signflow.git
 cd signflow
 pip install -r requirements.txt
 
-python scripts/run_demo.py
+python scripts/run_proto.py
