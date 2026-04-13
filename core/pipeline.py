@@ -22,9 +22,12 @@ class VisionPipeline:
         self._conf = conf
         self._running = False
 
-    def process_once(self) -> List[Box]:
+    def process_once(self):
         frame = self._capture.read()
-        return self._detector.detect(frame=frame, conf=self._conf)
+        boxes = self._detector.detect(frame=frame, conf=self._conf)
+        left, top = self._capture.origin
+        desktop_boxes = [(x1 + left, y1 + top, x2 + left, y2 + top) for x1, y1, x2, y2 in boxes]
+        return desktop_boxes
 
     def run(self, on_result=None, throttle_seconds: float = 0.0) -> None:
         self._running = True
