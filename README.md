@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The overlay will appear on your screen and detect everyone visible. Stable detections are drawn as green boxes, and raw detections can be shown in purple when debug visualization is enabled.
+The overlay will appear on your screen and detect everyone visible. Each person gets a stable green box that only realigns when the YOLO detection changes enough to matter. Raw detections can be shown in purple when debug visualization is enabled.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Documents/
 
 1. **Capture**: Grabs frames from screen using `mss`
 2. **Detect**: Runs YOLO person detection on each frame
-3. **Stabilize**: Smooths detections into a persistent active ROI
+3. **Stabilize**: Smooths detections into persistent per-person ROIs
 4. **Render**: Draws stabilized boxes on transparent overlay in real-time
 
 That's it. Simple, fast, extensible.

@@ -57,7 +57,7 @@ class VisionPipeline:
         left, top = self._capture.origin
         frame_height, frame_width = frame.shape[:2]
 
-        active_roi = self._stabilizer.update(detections, (frame_width, frame_height))
+        active_rois = self._stabilizer.update(detections, (frame_width, frame_height))
 
         # Convert box coordinates from frame-space to screen-space.
         raw_screen_boxes = [
@@ -65,22 +65,23 @@ class VisionPipeline:
             for x1, y1, x2, y2, conf in detections
         ]
 
-        stable_screen_boxes: List[Box] = []
-        active_roi_screen: Optional[Box] = None
-        if active_roi is not None:
-            x1, y1, x2, y2, confidence = active_roi
-            active_roi_screen = (x1 + left, y1 + top, x2 + left, y2 + top, confidence)
-            stable_screen_boxes = [active_roi_screen]
+        stable_screen_boxes: List[Box] = [
+            (x1 + left, y1 + top, x2 + left, y2 + top, confidence)
+            for x1, y1, x2, y2, confidence in active_rois
+        ]
 
         return {
             "raw_boxes": raw_screen_boxes,
             "stable_boxes": stable_screen_boxes,
-            "active_roi": active_roi,
-            "active_roi_screen": active_roi_screen,
+            "active_rois": active_rois,
             "debug_visualization": self._roi_config.debug_visualization,
             "stabilization_enabled": self._roi_config.enable_roi_stabilization,
+            "show_raw_boxes": self._roi_config.show_raw_boxes,
+            "show_stable_boxes": self._roi_config.show_stable_boxes,
+            "raw_box_rgb": self._roi_config.raw_box_rgb,
+            "stable_box_rgb": self._roi_config.stable_box_rgb,
         }
 
-    def get_active_roi(self) -> Optional[Box]:
-        """Expose the current stabilized ROI for downstream consumers."""
-        return self._stabilizer.get_active_roi()
+    def get_active_roi(self) -> List[Box]:
+        """Expose the current stabilized ROIs for downstream consumers."""
+        return self._stabilizer.get_active_rois()

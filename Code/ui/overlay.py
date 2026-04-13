@@ -25,7 +25,11 @@ class DetectionOverlay(QWidget):
         super().__init__()
         self._raw_boxes: List[Box] = []
         self._stable_boxes: List[Box] = []
-        self._active_roi: Optional[Box] = None
+        self._active_rois: List[Box] = []
+        self._show_raw_boxes = True
+        self._show_stable_boxes = True
+        self._raw_box_color = QColor(0, 255, 120)
+        self._stable_box_color = QColor(164, 78, 255)
         self._debug_visualization = False
         self._origin_x = 0
         self._origin_y = 0
@@ -58,7 +62,11 @@ class DetectionOverlay(QWidget):
         """
         self._raw_boxes = list(payload.get("raw_boxes", []))
         self._stable_boxes = list(payload.get("stable_boxes", []))
-        self._active_roi = payload.get("active_roi_screen") or payload.get("active_roi")
+        self._active_rois = list(payload.get("active_rois", []))
+        self._show_raw_boxes = bool(payload.get("show_raw_boxes", True))
+        self._show_stable_boxes = bool(payload.get("show_stable_boxes", True))
+        self._raw_box_color = self._parse_color(payload.get("raw_box_rgb"), QColor(0, 255, 120))
+        self._stable_box_color = self._parse_color(payload.get("stable_box_rgb"), QColor(164, 78, 255))
         self._debug_visualization = bool(payload.get("debug_visualization", False))
         self.update()
 
@@ -69,33 +77,24 @@ class DetectionOverlay(QWidget):
 
         painter.setBrush(Qt.NoBrush)
 
-        if self._debug_visualization:
+        if self._show_raw_boxes:
             self._draw_boxes(
                 painter,
                 self._raw_boxes,
-                box_color=QColor(164, 78, 255),
-                text_color=QColor(220, 180, 255),
+                box_color=self._raw_box_color,
+                text_color=self._raw_box_color.lighter(150),
                 pen_width=1,
                 label_prefix="raw",
             )
 
-        self._draw_boxes(
-            painter,
-            self._stable_boxes,
-            box_color=QColor(0, 255, 120),
-            text_color=QColor(30, 240, 140),
-            pen_width=2,
-            label_prefix="stable",
-        )
-
-        if self._active_roi is not None and not self._stable_boxes:
+        if self._show_stable_boxes:
             self._draw_boxes(
                 painter,
-                [self._active_roi],
-                box_color=QColor(0, 255, 120),
-                text_color=QColor(30, 240, 140),
+                self._stable_boxes,
+                box_color=self._stable_box_color,
+                text_color=self._stable_box_color.lighter(150),
                 pen_width=2,
-                label_prefix="roi",
+                label_prefix="stable",
             )
 
         painter.end()
@@ -124,3 +123,13 @@ class DetectionOverlay(QWidget):
             label = f"{label_prefix} {confidence:.2f}"
             painter.setPen(QPen(text_color, 1))
             painter.drawText(lx1 + 4, max(12, ly1 - 6), label)
+
+    def _parse_color(self, value, fallback: QColor) -> QColor:
+        """Convert a config color value into a QColor."""
+        if isinstance(value, (list, tuple)) and len(value) == 3:
+            try:
+                red, green, blue = (int(channel) for channel in value)
+                return QColor(red, green, blue)
+            except (TypeError, ValueError):
+                return fallback
+        return fallback

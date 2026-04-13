@@ -72,23 +72,24 @@ boxes = detector.detect_with_scores(frame, conf=0.35)
   1. Captures frame via `ScreenCapture`
   2. Runs detection via `PersonDetector`
   3. Stabilizes detections using `ROIStabilizer`
-  4. Converts raw and stabilized box coordinates to screen space
-  5. Returns payload dict for rendering and downstream consumption
+  4. Maintains one stabilized track per person when possible
+  5. Converts raw and stabilized box coordinates to screen space
+  6. Returns payload dict for rendering and downstream consumption
 
 **Usage**:
 ```python
 pipeline = VisionPipeline(model_path="models/yolov8n.pt")
 payload = pipeline.process_once()
-# Returns raw and stabilized streams plus active ROI metadata
+# Returns raw and stabilized streams plus active ROI metadata for all tracked people
 ```
 
 #### `roi_stabilizer.py` - ROIStabilizer
-- **Purpose**: Maintain a stable ROI from noisy detections
+- **Purpose**: Maintain stable ROIs from noisy detections, one track per person
 - **Key Classes**: `ROIStabilizer`, `ROIStabilizerConfig`
 - **How it works**:
-  1. Chooses the detection most consistent with the previous stable ROI
-  2. Applies padding and a configurable upward bias
-  3. Smooths motion with threshold-based realignment
+  1. Greedily matches detections to existing tracks by overlap and position
+  2. Applies padding and a configurable upward bias per track
+  3. Smooths motion with deadband and threshold-based realignment
   4. Predicts through dropouts with a simple velocity model
 
 **Usage**:

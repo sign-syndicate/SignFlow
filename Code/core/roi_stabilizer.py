@@ -6,7 +6,7 @@ from json import JSONDecodeError
 import json
 from math import hypot
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # Type hints
 Box = Tuple[int, int, int, int, float]
@@ -20,8 +20,9 @@ class ROIStabilizerConfig:
     """Runtime tuning values for the ROI stabilizer."""
 
     enable_roi_stabilization: bool = True
-    responsiveness: float = 0.35
-    realignment_threshold: float = 0.35
+    responsiveness: float = 0.20
+    realignment_threshold: float = 0.16
+    instant_realignment: bool = True
     padding_scale: float = 0.18
     padding_pixels: int = 12
     positional_bias_x: float = 0.0
@@ -33,6 +34,16 @@ class ROIStabilizerConfig:
     confidence_weight: float = 0.3
     velocity_decay: float = 0.88
     dropout_confidence_decay: float = 0.92
+    association_iou_threshold: float = 0.18
+    association_center_threshold: float = 0.55
+    association_distance_threshold: float = 0.62
+    new_track_iou_threshold: float = 0.08
+    max_missed_frames: int = 12
+    min_track_confidence: float = 0.10
+    show_raw_boxes: bool = True
+    show_stable_boxes: bool = True
+    raw_box_rgb: Tuple[int, int, int] = (0, 255, 120)
+    stable_box_rgb: Tuple[int, int, int] = (164, 78, 255)
 
     @classmethod
     def from_file(cls, config_path: str | Path | None) -> "ROIStabilizerConfig":
@@ -65,9 +76,20 @@ class ROIStabilizerConfig:
 class _TrackState:
     """Internal state for the stabilized ROI."""
 
+    track_id: int
     box: FloatBox
     confidence: float
     velocity: FloatBox
+    missed_frames: int = 0
+
+
+@dataclass(frozen=True)
+class StableROI:
+    """Public stable ROI returned to the overlay and downstream consumers."""
+
+    track_id: int
+    box: Box
+    confidence: float
 
 
 class ROIStabilizer:
@@ -75,7 +97,9 @@ class ROIStabilizer:
 
     def __init__(self, config: ROIStabilizerConfig | None = None) -> None:
         self._config = config or ROIStabilizerConfig()
-        self._state: Optional[_TrackState] = None
+        self._tracks: Dict[int, _TrackState] = {}
+        self._next_track_id = 1
+        self._last_frame_size: Optional[FrameSize] = None
 
     @property
     def config(self) -> ROIStabilizerConfig:
@@ -84,128 +108,196 @@ class ROIStabilizer:
 
     def reset(self) -> None:
         """Clear the internal ROI state."""
-        self._state = None
+        self._tracks.clear()
+        self._next_track_id = 1
+        self._last_frame_size = None
 
-    def get_active_roi(self) -> Optional[Box]:
-        """Return the current stabilized ROI in frame coordinates."""
-        if self._state is None:
-            return None
-        x1, y1, x2, y2 = self._state.box
-        return (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(self._state.confidence))
+    def get_active_rois(self) -> List[Box]:
+        """Return the current stabilized ROIs in frame coordinates."""
+        if self._last_frame_size is None:
+            return []
+        return [self._track_to_box(track, self._last_frame_size) for track in self._sorted_tracks()]
 
-    def update(self, detections: Sequence[Box], frame_size: FrameSize) -> Optional[Box]:
+    def get_active_roi(self) -> List[Box]:
+        """Compatibility alias for callers that still expect the singular name."""
+        return self.get_active_rois()
+
+    def update(self, detections: Sequence[Box], frame_size: FrameSize) -> List[Box]:
         """Update the stabilizer with a new set of detections for the current frame."""
+        self._last_frame_size = frame_size
         if not self._config.enable_roi_stabilization:
             return self._update_without_stabilization(detections, frame_size)
 
-        best_detection = self._select_detection(detections)
+        detections = [detection for detection in detections if detection[4] >= self._config.min_track_confidence]
+        raw_detections = [tuple(float(value) for value in detection[:4]) + (float(detection[4]),) for detection in detections]
 
-        if best_detection is None:
-            return self._handle_dropout(frame_size)
+        assignments, unmatched_tracks, unmatched_detections = self._associate(raw_detections)
 
-        target_box = self._expand_and_bias(best_detection[:4], frame_size)
-        target_confidence = float(best_detection[4])
+        for track_id, detection_index in assignments.items():
+            track = self._tracks[track_id]
+            detection = raw_detections[detection_index]
+            self._tracks[track_id] = self._update_track(track, detection, frame_size)
 
-        if self._state is None:
-            self._state = _TrackState(
-                box=target_box,
-                confidence=target_confidence,
-                velocity=(0.0, 0.0, 0.0, 0.0),
-            )
-            return self._state_to_box()
+        for track_id in unmatched_tracks:
+            track = self._tracks[track_id]
+            self._tracks[track_id] = self._predict_track(track, frame_size)
 
-        predicted_box = self._predict_box(frame_size)
-        blend_factor = self._resolve_blend_factor(predicted_box, target_box)
+        for detection_index in unmatched_detections:
+            if self._should_spawn_track(raw_detections[detection_index]):
+                self._spawn_track(raw_detections[detection_index], frame_size)
 
-        blended_box = self._blend_boxes(predicted_box, target_box, blend_factor)
+        self._prune_tracks()
+        return self.get_active_rois()
+
+    def _update_without_stabilization(self, detections: Sequence[Box], frame_size: FrameSize) -> List[Box]:
+        """Bypass smoothing while still applying padding and consistency checks."""
+        self._tracks.clear()
+        for detection in detections:
+            if detection[4] < self._config.min_track_confidence:
+                continue
+            self._spawn_track(tuple(float(value) for value in detection[:4]) + (float(detection[4]),), frame_size)
+        return self.get_active_rois()
+
+    def _associate(self, detections: Sequence[Tuple[float, float, float, float, float]]) -> Tuple[Dict[int, int], List[int], List[int]]:
+        """Greedily associate detections to existing tracks using overlap and proximity."""
+        if not self._tracks:
+            return {}, [], list(range(len(detections)))
+
+        candidates: List[Tuple[float, int, int]] = []
+        for track_id, track in self._tracks.items():
+            predicted_box = self._predict_box(track, None)
+            for detection_index, detection in enumerate(detections):
+                detection_box = detection[:4]
+                score = self._association_score(predicted_box, detection_box, detection[4])
+                candidates.append((score, track_id, detection_index))
+
+        assignments: Dict[int, int] = {}
+        used_tracks: set[int] = set()
+        used_detections: set[int] = set()
+
+        for score, track_id, detection_index in sorted(candidates, reverse=True):
+            if track_id in used_tracks or detection_index in used_detections:
+                continue
+            track = self._tracks[track_id]
+            detection_box = detections[detection_index][:4]
+            iou_score = self._intersection_over_union(track.box, detection_box)
+            center_distance = self._center_distance(track.box, detection_box)
+            if iou_score < self._config.association_iou_threshold and center_distance > self._config.association_center_threshold:
+                continue
+            assignments[track_id] = detection_index
+            used_tracks.add(track_id)
+            used_detections.add(detection_index)
+
+        unmatched_tracks = [track_id for track_id in self._tracks if track_id not in used_tracks]
+        unmatched_detections = [index for index in range(len(detections)) if index not in used_detections]
+        return assignments, unmatched_tracks, unmatched_detections
+
+    def _association_score(self, track_box: FloatBox, detection_box: FloatBox, confidence: float) -> float:
+        iou_score = self._intersection_over_union(track_box, detection_box)
+        center_distance = self._center_distance(track_box, detection_box)
+        size_distance = self._size_distance(track_box, detection_box)
+        return (iou_score * self._config.iou_weight) + (confidence * self._config.confidence_weight) - (center_distance * 0.14) - (size_distance * 0.10)
+
+    def _spawn_track(self, detection: Tuple[float, float, float, float, float], frame_size: FrameSize) -> None:
+        box = self._clamp_box(detection[:4], frame_size)
+        confidence = float(detection[4])
+        track = _TrackState(
+            track_id=self._next_track_id,
+            box=box,
+            confidence=confidence,
+            velocity=(0.0, 0.0, 0.0, 0.0),
+            missed_frames=0,
+        )
+        self._tracks[self._next_track_id] = track
+        self._next_track_id += 1
+
+    def _should_spawn_track(self, detection: Tuple[float, float, float, float, float]) -> bool:
+        """Avoid spawning a duplicate track for detections that still overlap an active track."""
+        if not self._tracks:
+            return True
+
+        detection_box = detection[:4]
+        for track in self._tracks.values():
+            iou_score = self._intersection_over_union(track.box, detection_box)
+            center_distance = self._center_distance(track.box, detection_box)
+            if iou_score >= self._config.new_track_iou_threshold or center_distance <= self._config.association_distance_threshold:
+                return False
+
+        return True
+
+    def _update_track(self, track: _TrackState, detection: Tuple[float, float, float, float, float], frame_size: FrameSize) -> _TrackState:
+        target_box = self._clamp_box(detection[:4], frame_size)
+        alpha = self._resolve_blend_factor(track.box, target_box)
+
+        if self._should_hold_box(track.box, target_box):
+            blended_box = track.box
+        else:
+            blended_box = self._blend_boxes(track.box, target_box, alpha)
+
         clamped_box = self._clamp_box(blended_box, frame_size)
-
-        previous_box = self._state.box
         velocity = tuple(
-            (clamped_box[index] - previous_box[index]) + (self._state.velocity[index] * self._config.velocity_decay)
+            (clamped_box[index] - track.box[index]) + (track.velocity[index] * self._config.velocity_decay)
             for index in range(4)
         )
-        confidence = (self._state.confidence * (1.0 - blend_factor)) + (target_confidence * blend_factor)
+        confidence = (track.confidence * (1.0 - alpha)) + (float(detection[4]) * alpha)
+        return _TrackState(
+            track_id=track.track_id,
+            box=clamped_box,
+            confidence=confidence,
+            velocity=velocity,
+            missed_frames=0,
+        )
 
-        self._state = _TrackState(box=clamped_box, confidence=confidence, velocity=velocity)
-        return self._state_to_box()
-
-    def _update_without_stabilization(self, detections: Sequence[Box], frame_size: FrameSize) -> Optional[Box]:
-        """Bypass smoothing while still applying padding and consistency checks."""
-        best_detection = self._select_detection(detections)
-        if best_detection is None:
-            self._state = None
-            return None
-
-        padded_box = self._expand_and_bias(best_detection[:4], frame_size)
-        self._state = _TrackState(box=padded_box, confidence=float(best_detection[4]), velocity=(0.0, 0.0, 0.0, 0.0))
-        return self._state_to_box()
-
-    def _handle_dropout(self, frame_size: FrameSize) -> Optional[Box]:
-        """Advance the ROI using prediction when detections disappear."""
-        if self._state is None:
-            return None
-
+    def _predict_track(self, track: _TrackState, frame_size: FrameSize) -> _TrackState:
         if not self._config.prediction_enable:
-            return self._state_to_box()
+            return _TrackState(
+                track_id=track.track_id,
+                box=track.box,
+                confidence=track.confidence,
+                velocity=tuple(component * self._config.velocity_decay for component in track.velocity),
+                missed_frames=track.missed_frames + 1,
+            )
 
-        predicted_box = self._predict_box(frame_size)
-        confidence = self._state.confidence * self._config.dropout_confidence_decay
-        velocity = tuple(component * self._config.velocity_decay for component in self._state.velocity)
-        self._state = _TrackState(box=predicted_box, confidence=confidence, velocity=velocity)
-        return self._state_to_box()
+        predicted_box = self._predict_box(track, frame_size)
+        confidence = track.confidence * self._config.dropout_confidence_decay
+        velocity = tuple(component * self._config.velocity_decay for component in track.velocity)
+        return _TrackState(
+            track_id=track.track_id,
+            box=predicted_box,
+            confidence=confidence,
+            velocity=velocity,
+            missed_frames=track.missed_frames + 1,
+        )
 
-    def _predict_box(self, frame_size: FrameSize) -> FloatBox:
-        """Project the current box forward using a simple velocity model."""
-        if self._state is None:
-            return (0.0, 0.0, 0.0, 0.0)
-
-        predicted = tuple(self._state.box[index] + self._state.velocity[index] for index in range(4))
+    def _predict_box(self, track: _TrackState, frame_size: FrameSize | None) -> FloatBox:
+        predicted = tuple(track.box[index] + track.velocity[index] for index in range(4))
+        if frame_size is None:
+            return predicted
         return self._clamp_box(predicted, frame_size)
 
-    def _resolve_blend_factor(self, predicted_box: FloatBox, target_box: FloatBox) -> float:
-        """Determine how aggressively the stable ROI should move toward the new detection."""
-        if self._state is None:
-            return 1.0
+    def _should_hold_box(self, previous_box: FloatBox, target_box: FloatBox) -> bool:
+        deviation = self._box_deviation(previous_box, target_box)
+        return deviation < self._config.realignment_threshold * 0.45
 
-        deviation = self._box_deviation(predicted_box, target_box)
+    def _resolve_blend_factor(self, previous_box: FloatBox, target_box: FloatBox) -> float:
+        deviation = self._box_deviation(previous_box, target_box)
         base = self._clamp01(self._config.responsiveness)
 
         if deviation >= self._config.realignment_threshold:
-            return min(0.95, max(base, 0.7))
+            if self._config.instant_realignment:
+                return 1.0
+            return min(0.9, max(base, 0.55))
+
+        if deviation <= self._config.realignment_threshold * 0.25:
+            return 0.0
 
         if self._config.yolo_box_approximation:
-            return max(0.08, base * 0.45)
+            return max(0.05, base * 0.35)
 
-        return max(0.12, base * 0.7)
-
-    def _select_detection(self, detections: Sequence[Box]) -> Optional[Box]:
-        """Select the detection most consistent with the current stabilized ROI."""
-        if not detections:
-            return None
-
-        if self._state is None:
-            return max(detections, key=lambda detection: (detection[4], self._area(detection[:4])))
-
-        current_box = self._state.box
-
-        def score_detection(detection: Box) -> float:
-            detection_box = tuple(float(value) for value in detection[:4])
-            iou_score = self._intersection_over_union(current_box, detection_box)
-            center_distance = self._center_distance(current_box, detection_box)
-            size_distance = self._size_distance(current_box, detection_box)
-            confidence = float(detection[4])
-            return (
-                iou_score * self._config.iou_weight
-                + confidence * self._config.confidence_weight
-                - center_distance * 0.12
-                - size_distance * 0.08
-            )
-
-        return max(detections, key=score_detection)
+        return max(0.08, base * 0.55)
 
     def _expand_and_bias(self, box: FrameBox, frame_size: FrameSize) -> FloatBox:
-        """Apply padding and a slight positional bias before stabilization."""
+        """Apply padding and a slight positional bias for the visual ROI output only."""
         x1, y1, x2, y2 = (float(value) for value in box)
         width = max(1.0, x2 - x1)
         height = max(1.0, y2 - y1)
@@ -232,12 +324,17 @@ class ROIStabilizer:
         beta = 1.0 - alpha
         return tuple((previous_box[index] * beta) + (target_box[index] * alpha) for index in range(4))
 
-    def _state_to_box(self) -> Optional[Box]:
-        if self._state is None:
-            return None
+    def _track_to_box(self, track: _TrackState, frame_size: FrameSize) -> Box:
+        x1, y1, x2, y2 = self._expand_and_bias(track.box, frame_size)
+        return (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(track.confidence))
 
-        x1, y1, x2, y2 = self._state.box
-        return (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), float(self._state.confidence))
+    def _sorted_tracks(self) -> List[_TrackState]:
+        return sorted(self._tracks.values(), key=lambda track: (-track.confidence, track.track_id))
+
+    def _prune_tracks(self) -> None:
+        to_delete = [track_id for track_id, track in self._tracks.items() if track.missed_frames > self._config.max_missed_frames or track.confidence < self._config.min_track_confidence * 0.4]
+        for track_id in to_delete:
+            self._tracks.pop(track_id, None)
 
     def _clamp_box(self, box: FloatBox, frame_size: FrameSize) -> FloatBox:
         """Clamp a box to the current frame and preserve a minimum size."""
