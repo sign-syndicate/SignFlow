@@ -29,6 +29,7 @@ WM_HOTKEY = 0x0312
 VK_S = 0x53
 VK_R = 0x52
 VK_T = 0x54
+VK_Y = 0x59
 VK_D = 0x44
 HOTKEY_TOGGLE_OVERLAY_ID = 1
 HOTKEY_TOGGLE_RAW_ID = 2
@@ -50,11 +51,12 @@ class HotKeyListener:
         self._thread = None
         self._running = False
         self._thread_id = None
+        self._active_hotkey_ids: list[int] = []
         self._registered_hotkeys = [
-            (HOTKEY_TOGGLE_OVERLAY_ID, VK_S, "Ctrl+Alt+S"),
-            (HOTKEY_TOGGLE_RAW_ID, VK_R, "Ctrl+Alt+R"),
-            (HOTKEY_TOGGLE_STABLE_ID, VK_T, "Ctrl+Alt+T"),
-            (HOTKEY_TOGGLE_FOCUS_ID, VK_D, "Ctrl+Alt+D"),
+            (HOTKEY_TOGGLE_OVERLAY_ID, [(VK_S, "Ctrl+Alt+S")]),
+            (HOTKEY_TOGGLE_RAW_ID, [(VK_R, "Ctrl+Alt+R")]),
+            (HOTKEY_TOGGLE_STABLE_ID, [(VK_T, "Ctrl+Alt+T"), (VK_Y, "Ctrl+Alt+Y")]),
+            (HOTKEY_TOGGLE_FOCUS_ID, [(VK_D, "Ctrl+Alt+D")]),
         ]
 
     def start(self):
@@ -78,17 +80,25 @@ class HotKeyListener:
         try:
             self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
             # Register hotkeys
-            for hotkey_id, virtual_key, label in self._registered_hotkeys:
-                result = ctypes.windll.user32.RegisterHotKey(
-                    None,
-                    hotkey_id,
-                    MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
-                    virtual_key,
-                )
-                if result:
-                    print(f"{label} hotkey registered")
-                else:
-                    print(f"Failed to register {label} hotkey")
+            for hotkey_id, candidates in self._registered_hotkeys:
+                registered = False
+                for virtual_key, label in candidates:
+                    modifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT
+                    result = ctypes.windll.user32.RegisterHotKey(None, hotkey_id, modifiers, virtual_key)
+                    if not result:
+                        # Fallback for systems/apps where MOD_NOREPEAT registration is rejected.
+                        modifiers = MOD_CONTROL | MOD_ALT
+                        result = ctypes.windll.user32.RegisterHotKey(None, hotkey_id, modifiers, virtual_key)
+
+                    if result:
+                        self._active_hotkey_ids.append(hotkey_id)
+                        print(f"{label} hotkey registered")
+                        registered = True
+                        break
+
+                if not registered:
+                    labels = " or ".join(label for _, label in candidates)
+                    print(f"Failed to register {labels}")
 
             # Create a message queue to receive hotkey events
             msg = wintypes.MSG()
@@ -105,7 +115,7 @@ class HotKeyListener:
         except Exception as e:
             print(f"Hotkey listener error: {e}")
         finally:
-            for hotkey_id, _, _ in self._registered_hotkeys:
+            for hotkey_id in self._active_hotkey_ids:
                 try:
                     ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
                 except Exception:
@@ -162,7 +172,7 @@ def main() -> int:
     action_show = QAction("Show", menu)
     action_hide = QAction("Hide", menu)
     action_toggle_raw = QAction("Toggle Raw Boxes (Ctrl+Alt+R)", menu)
-    action_toggle_stable = QAction("Toggle Stable Boxes (Ctrl+Alt+T)", menu)
+    action_toggle_stable = QAction("Toggle Stable Boxes (Ctrl+Alt+T / Ctrl+Alt+Y)", menu)
     action_toggle_focus = QAction("Toggle Focus Dim (Ctrl+Alt+D)", menu)
     action_exit = QAction("Exit", menu)
 
@@ -244,7 +254,7 @@ def main() -> int:
     tray.show()
     tray.showMessage(
         "SignFlow Running",
-        "Ctrl+Alt+S overlay, Ctrl+Alt+R raw, Ctrl+Alt+T stable, Ctrl+Alt+D focus.",
+        "Ctrl+Alt+S overlay, Ctrl+Alt+R raw, Ctrl+Alt+T stable (fallback Y), Ctrl+Alt+D focus.",
         QSystemTrayIcon.Information,
         2500,
     )

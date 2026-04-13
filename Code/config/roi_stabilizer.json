@@ -25,5 +25,5 @@
   "raw_box_rgb": [0, 255, 120],
   "stable_box_rgb": [164, 78, 255],
   "focus_mode_enabled": false,
-  "focus_dim_alpha": 96
+  "focus_dim_alpha": 150
 }

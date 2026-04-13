@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QPainter, QPen
+from PyQt5.QtGui import QColor, QPainter, QPen, QRegion
 from PyQt5.QtWidgets import QApplication, QWidget
 
 # Type hints
@@ -34,7 +34,10 @@ class DetectionOverlay(QWidget):
         self._user_stable_override = False
         self._focus_mode_enabled = False
         self._user_focus_override = False
-        self._focus_dim_alpha = 90
+        self._focus_dim_alpha = 255
+        self._focus_rois: List[Box] = []
+        self._focus_hold_frames = 6
+        self._focus_missing_frames = 0
         self._raw_box_color = QColor(0, 255, 120)
         self._stable_box_color = QColor(164, 78, 255)
         self._debug_visualization = False
@@ -70,6 +73,14 @@ class DetectionOverlay(QWidget):
         self._raw_boxes = list(payload.get("raw_boxes", []))
         self._stable_boxes = list(payload.get("stable_boxes", []))
         self._active_rois = list(payload.get("active_rois", []))
+
+        if self._stable_boxes:
+            self._focus_rois = list(self._stable_boxes)
+            self._focus_missing_frames = 0
+        else:
+            self._focus_missing_frames += 1
+            if self._focus_missing_frames > self._focus_hold_frames:
+                self._focus_rois = []
         self._config_show_raw_boxes = bool(payload.get("show_raw_boxes", True))
         self._config_show_stable_boxes = bool(payload.get("show_stable_boxes", True))
         if not self._user_raw_override:
@@ -79,7 +90,7 @@ class DetectionOverlay(QWidget):
         config_focus_enabled = bool(payload.get("focus_mode_enabled", False))
         if not self._user_focus_override:
             self._focus_mode_enabled = config_focus_enabled
-        self._focus_dim_alpha = max(0, min(220, int(payload.get("focus_dim_alpha", 90))))
+        self._focus_dim_alpha = max(0, min(255, int(payload.get("focus_dim_alpha", 255))))
         self._raw_box_color = self._parse_color(payload.get("raw_box_rgb"), QColor(0, 255, 120))
         self._stable_box_color = self._parse_color(payload.get("stable_box_rgb"), QColor(164, 78, 255))
         self._debug_visualization = bool(payload.get("debug_visualization", False))
@@ -92,8 +103,8 @@ class DetectionOverlay(QWidget):
 
         painter.setBrush(Qt.NoBrush)
 
-        if self._focus_mode_enabled and self._stable_boxes:
-            self._draw_focus_dim_layer(painter, self._stable_boxes)
+        if self._focus_mode_enabled and self._focus_rois:
+            self._draw_focus_dim_layer(painter, self._focus_rois)
 
         if self._show_raw_boxes:
             self._draw_boxes(
@@ -172,16 +183,25 @@ class DetectionOverlay(QWidget):
 
     def _draw_focus_dim_layer(self, painter: QPainter, focus_boxes: List[Box]) -> None:
         """Darken non-ROI regions while leaving ROI windows transparent."""
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 0, 0, self._focus_dim_alpha))
-        painter.drawRect(self.rect())
-
-        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        dim_region = QRegion(self.rect())
         for x1, y1, x2, y2, _ in focus_boxes:
             lx1 = x1 - self._origin_x
             ly1 = y1 - self._origin_y
             width = max(1, x2 - x1)
             height = max(1, y2 - y1)
-            painter.drawRoundedRect(lx1, ly1, width, height, 8.0, 8.0)
+            roi_left = max(0, lx1)
+            roi_top = max(0, ly1)
+            roi_right = min(self.width(), lx1 + width)
+            roi_bottom = min(self.height(), ly1 + height)
+            roi_width = roi_right - roi_left
+            roi_height = roi_bottom - roi_top
+            if roi_width <= 0 or roi_height <= 0:
+                continue
+            roi_region = QRegion(roi_left, roi_top, roi_width, roi_height)
+            dim_region = dim_region.subtracted(roi_region)
 
-        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setClipRegion(dim_region)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, self._focus_dim_alpha))
+        painter.restore()
