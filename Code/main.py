@@ -1,10 +1,14 @@
 """SignFlow - Main entry point."""
 from __future__ import annotations
 
+import ctypes
 import sys
+import threading
+import time
+from ctypes import wintypes
 from pathlib import Path
 
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import QAction, QApplication, QMenu, QStyle, QSystemTrayIcon
 
 # Handle imports whether run from root or directly
@@ -16,6 +20,82 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from core import VisionPipeline
     from ui import DetectionOverlay
+
+# Windows API Constants
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+VK_S = 0x53
+HOTKEY_ID = 1
+
+
+class HotKeyBridge(QObject):
+    """Bridges hotkey events from a background thread to the Qt UI thread."""
+
+    triggered = pyqtSignal()
+
+
+class HotKeyListener:
+    """Listen for hotkey in background thread."""
+
+    def __init__(self, callback):
+        self._callback = callback
+        self._thread = None
+        self._running = False
+        self._thread_id = None
+
+    def start(self):
+        """Start listening for hotkey."""
+        self._running = True
+        self._thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self._thread.start()
+        print("Hotkey listener thread started")
+
+    def stop(self):
+        """Stop listening."""
+        self._running = False
+        if self._thread_id is not None:
+            # Unblock GetMessageW so the thread can exit promptly.
+            ctypes.windll.user32.PostThreadMessageW(self._thread_id, 0x0012, 0, 0)  # WM_QUIT
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def _listen_loop(self):
+        """Background thread that waits for hotkey message."""
+        try:
+            self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+            # Register hotkey
+            result = ctypes.windll.user32.RegisterHotKey(
+                None,
+                HOTKEY_ID,
+                MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                VK_S,
+            )
+            if not result:
+                print("Failed to register Ctrl+Alt+S hotkey")
+                return
+            print("Ctrl+Alt+S hotkey registered")
+
+            # Create a message queue to receive hotkey events
+            msg = wintypes.MSG()
+            while self._running:
+                # Pump messages - GetMessage blocks until a message arrives
+                res = ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if res == 0:  # WM_QUIT
+                    break
+                if res < 0:
+                    break
+
+                if msg.message == WM_HOTKEY:
+                    self._callback()
+        except Exception as e:
+            print(f"Hotkey listener error: {e}")
+        finally:
+            try:
+                ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
+            except Exception:
+                pass
 
 
 class PipelineWorker(QThread):
@@ -76,11 +156,35 @@ def main() -> int:
     worker = PipelineWorker(model_path=model_path)
     worker.result_ready.connect(overlay.update_payload)
 
+    hotkey_bridge = HotKeyBridge()
+
+    # Setup hotkey toggle (Ctrl+Alt+S)
+    last_toggle = 0.0
+
+    def toggle_overlay():
+        nonlocal last_toggle
+        now = time.monotonic()
+        # Guard against pathological burst input while preserving responsiveness.
+        if now - last_toggle < 0.08:
+            return
+        last_toggle = now
+        if overlay.isVisible():
+            overlay.hide()
+        else:
+            overlay.show()
+            overlay.raise_()
+
+    hotkey_bridge.triggered.connect(toggle_overlay, Qt.QueuedConnection)
+
+    hotkey_listener = HotKeyListener(hotkey_bridge.triggered.emit)
+    hotkey_listener.start()
+
     # Connect menu actions
     action_show.triggered.connect(lambda: (overlay.show(), overlay.raise_()))
     action_hide.triggered.connect(overlay.hide)
 
     def on_exit():
+        hotkey_listener.stop()
         worker.stop()
         worker.wait(5000)
         tray.hide()
@@ -99,7 +203,7 @@ def main() -> int:
     tray.show()
     tray.showMessage(
         "SignFlow Running",
-        "Double-click tray to toggle overlay.",
+        "Use Ctrl+Alt+S to toggle overlay. Double-click tray to show.",
         QSystemTrayIcon.Information,
         2500,
     )
