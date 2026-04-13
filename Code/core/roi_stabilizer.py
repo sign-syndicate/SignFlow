@@ -23,10 +23,10 @@ class ROIStabilizerConfig:
     responsiveness: float = 0.20
     realignment_threshold: float = 0.16
     instant_realignment: bool = True
-    padding_scale: float = 0.18
-    padding_pixels: int = 12
+    padding_scale: float = 0.10
+    padding_pixels: int = 6
     positional_bias_x: float = 0.0
-    positional_bias_y: float = -0.08
+    positional_bias_y: float = -0.03
     prediction_enable: bool = True
     debug_visualization: bool = False
     yolo_box_approximation: bool = True
@@ -44,6 +44,8 @@ class ROIStabilizerConfig:
     show_stable_boxes: bool = True
     raw_box_rgb: Tuple[int, int, int] = (0, 255, 120)
     stable_box_rgb: Tuple[int, int, int] = (164, 78, 255)
+    focus_mode_enabled: bool = False
+    focus_dim_alpha: int = 96
 
     @classmethod
     def from_file(cls, config_path: str | Path | None) -> "ROIStabilizerConfig":

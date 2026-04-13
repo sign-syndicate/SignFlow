@@ -80,6 +80,8 @@ class VisionPipeline:
             "show_stable_boxes": self._roi_config.show_stable_boxes,
             "raw_box_rgb": self._roi_config.raw_box_rgb,
             "stable_box_rgb": self._roi_config.stable_box_rgb,
+            "focus_mode_enabled": self._roi_config.focus_mode_enabled,
+            "focus_dim_alpha": self._roi_config.focus_dim_alpha,
         }
 
     def get_active_roi(self) -> List[Box]:

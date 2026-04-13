@@ -27,13 +27,19 @@ MOD_CONTROL = 0x0002
 MOD_NOREPEAT = 0x4000
 WM_HOTKEY = 0x0312
 VK_S = 0x53
-HOTKEY_ID = 1
+VK_R = 0x52
+VK_T = 0x54
+VK_D = 0x44
+HOTKEY_TOGGLE_OVERLAY_ID = 1
+HOTKEY_TOGGLE_RAW_ID = 2
+HOTKEY_TOGGLE_STABLE_ID = 3
+HOTKEY_TOGGLE_FOCUS_ID = 4
 
 
 class HotKeyBridge(QObject):
     """Bridges hotkey events from a background thread to the Qt UI thread."""
 
-    triggered = pyqtSignal()
+    triggered = pyqtSignal(int)
 
 
 class HotKeyListener:
@@ -44,6 +50,12 @@ class HotKeyListener:
         self._thread = None
         self._running = False
         self._thread_id = None
+        self._registered_hotkeys = [
+            (HOTKEY_TOGGLE_OVERLAY_ID, VK_S, "Ctrl+Alt+S"),
+            (HOTKEY_TOGGLE_RAW_ID, VK_R, "Ctrl+Alt+R"),
+            (HOTKEY_TOGGLE_STABLE_ID, VK_T, "Ctrl+Alt+T"),
+            (HOTKEY_TOGGLE_FOCUS_ID, VK_D, "Ctrl+Alt+D"),
+        ]
 
     def start(self):
         """Start listening for hotkey."""
@@ -65,17 +77,18 @@ class HotKeyListener:
         """Background thread that waits for hotkey message."""
         try:
             self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
-            # Register hotkey
-            result = ctypes.windll.user32.RegisterHotKey(
-                None,
-                HOTKEY_ID,
-                MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
-                VK_S,
-            )
-            if not result:
-                print("Failed to register Ctrl+Alt+S hotkey")
-                return
-            print("Ctrl+Alt+S hotkey registered")
+            # Register hotkeys
+            for hotkey_id, virtual_key, label in self._registered_hotkeys:
+                result = ctypes.windll.user32.RegisterHotKey(
+                    None,
+                    hotkey_id,
+                    MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                    virtual_key,
+                )
+                if result:
+                    print(f"{label} hotkey registered")
+                else:
+                    print(f"Failed to register {label} hotkey")
 
             # Create a message queue to receive hotkey events
             msg = wintypes.MSG()
@@ -88,14 +101,15 @@ class HotKeyListener:
                     break
 
                 if msg.message == WM_HOTKEY:
-                    self._callback()
+                    self._callback(int(msg.wParam))
         except Exception as e:
             print(f"Hotkey listener error: {e}")
         finally:
-            try:
-                ctypes.windll.user32.UnregisterHotKey(None, HOTKEY_ID)
-            except Exception:
-                pass
+            for hotkey_id, _, _ in self._registered_hotkeys:
+                try:
+                    ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+                except Exception:
+                    pass
 
 
 class PipelineWorker(QThread):
@@ -147,10 +161,17 @@ def main() -> int:
     menu = QMenu()
     action_show = QAction("Show", menu)
     action_hide = QAction("Hide", menu)
+    action_toggle_raw = QAction("Toggle Raw Boxes (Ctrl+Alt+R)", menu)
+    action_toggle_stable = QAction("Toggle Stable Boxes (Ctrl+Alt+T)", menu)
+    action_toggle_focus = QAction("Toggle Focus Dim (Ctrl+Alt+D)", menu)
     action_exit = QAction("Exit", menu)
 
     menu.addAction(action_show)
     menu.addAction(action_hide)
+    menu.addSeparator()
+    menu.addAction(action_toggle_raw)
+    menu.addAction(action_toggle_stable)
+    menu.addAction(action_toggle_focus)
     menu.addSeparator()
     menu.addAction(action_exit)
     tray.setContextMenu(menu)
@@ -161,23 +182,37 @@ def main() -> int:
 
     hotkey_bridge = HotKeyBridge()
 
-    # Setup hotkey toggle (Ctrl+Alt+S)
-    last_toggle = 0.0
+    # Setup hotkeys
+    last_hotkey_times: dict[int, float] = {}
 
-    def toggle_overlay():
-        nonlocal last_toggle
+    def _should_ignore_hotkey(hotkey_id: int) -> bool:
         now = time.monotonic()
         # Guard against pathological burst input while preserving responsiveness.
-        if now - last_toggle < 0.08:
-            return
-        last_toggle = now
+        if now - last_hotkey_times.get(hotkey_id, 0.0) < 0.08:
+            return True
+        last_hotkey_times[hotkey_id] = now
+        return False
+
+    def toggle_overlay():
         if overlay.isVisible():
             overlay.hide()
         else:
             overlay.show()
             overlay.raise_()
 
-    hotkey_bridge.triggered.connect(toggle_overlay, Qt.QueuedConnection)
+    def handle_hotkey(hotkey_id: int):
+        if _should_ignore_hotkey(hotkey_id):
+            return
+        if hotkey_id == HOTKEY_TOGGLE_OVERLAY_ID:
+            toggle_overlay()
+        elif hotkey_id == HOTKEY_TOGGLE_RAW_ID:
+            overlay.toggle_raw_boxes()
+        elif hotkey_id == HOTKEY_TOGGLE_STABLE_ID:
+            overlay.toggle_stable_boxes()
+        elif hotkey_id == HOTKEY_TOGGLE_FOCUS_ID:
+            overlay.toggle_focus_mode()
+
+    hotkey_bridge.triggered.connect(handle_hotkey, Qt.QueuedConnection)
 
     hotkey_listener = HotKeyListener(hotkey_bridge.triggered.emit)
     hotkey_listener.start()
@@ -185,6 +220,9 @@ def main() -> int:
     # Connect menu actions
     action_show.triggered.connect(lambda: (overlay.show(), overlay.raise_()))
     action_hide.triggered.connect(overlay.hide)
+    action_toggle_raw.triggered.connect(overlay.toggle_raw_boxes)
+    action_toggle_stable.triggered.connect(overlay.toggle_stable_boxes)
+    action_toggle_focus.triggered.connect(overlay.toggle_focus_mode)
 
     def on_exit():
         hotkey_listener.stop()
@@ -206,7 +244,7 @@ def main() -> int:
     tray.show()
     tray.showMessage(
         "SignFlow Running",
-        "Use Ctrl+Alt+S to toggle overlay. Double-click tray to show.",
+        "Ctrl+Alt+S overlay, Ctrl+Alt+R raw, Ctrl+Alt+T stable, Ctrl+Alt+D focus.",
         QSystemTrayIcon.Information,
         2500,
     )

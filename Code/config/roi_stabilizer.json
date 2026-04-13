@@ -3,10 +3,10 @@
   "responsiveness": 0.2,
   "realignment_threshold": 0.16,
   "instant_realignment": true,
-  "padding_scale": 0.18,
-  "padding_pixels": 12,
+  "padding_scale": 0.1,
+  "padding_pixels": 6,
   "positional_bias_x": 0.0,
-  "positional_bias_y": -0.08,
+  "positional_bias_y": -0.03,
   "prediction_enable": true,
   "debug_visualization": false,
   "yolo_box_approximation": true,
@@ -23,5 +23,7 @@
   "show_raw_boxes": true,
   "show_stable_boxes": true,
   "raw_box_rgb": [0, 255, 120],
-  "stable_box_rgb": [164, 78, 255]
+  "stable_box_rgb": [164, 78, 255],
+  "focus_mode_enabled": false,
+  "focus_dim_alpha": 96
 }

@@ -26,8 +26,15 @@ class DetectionOverlay(QWidget):
         self._raw_boxes: List[Box] = []
         self._stable_boxes: List[Box] = []
         self._active_rois: List[Box] = []
+        self._config_show_raw_boxes = True
+        self._config_show_stable_boxes = True
         self._show_raw_boxes = True
         self._show_stable_boxes = True
+        self._user_raw_override = False
+        self._user_stable_override = False
+        self._focus_mode_enabled = False
+        self._user_focus_override = False
+        self._focus_dim_alpha = 90
         self._raw_box_color = QColor(0, 255, 120)
         self._stable_box_color = QColor(164, 78, 255)
         self._debug_visualization = False
@@ -63,8 +70,16 @@ class DetectionOverlay(QWidget):
         self._raw_boxes = list(payload.get("raw_boxes", []))
         self._stable_boxes = list(payload.get("stable_boxes", []))
         self._active_rois = list(payload.get("active_rois", []))
-        self._show_raw_boxes = bool(payload.get("show_raw_boxes", True))
-        self._show_stable_boxes = bool(payload.get("show_stable_boxes", True))
+        self._config_show_raw_boxes = bool(payload.get("show_raw_boxes", True))
+        self._config_show_stable_boxes = bool(payload.get("show_stable_boxes", True))
+        if not self._user_raw_override:
+            self._show_raw_boxes = self._config_show_raw_boxes
+        if not self._user_stable_override:
+            self._show_stable_boxes = self._config_show_stable_boxes
+        config_focus_enabled = bool(payload.get("focus_mode_enabled", False))
+        if not self._user_focus_override:
+            self._focus_mode_enabled = config_focus_enabled
+        self._focus_dim_alpha = max(0, min(220, int(payload.get("focus_dim_alpha", 90))))
         self._raw_box_color = self._parse_color(payload.get("raw_box_rgb"), QColor(0, 255, 120))
         self._stable_box_color = self._parse_color(payload.get("stable_box_rgb"), QColor(164, 78, 255))
         self._debug_visualization = bool(payload.get("debug_visualization", False))
@@ -76,6 +91,9 @@ class DetectionOverlay(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         painter.setBrush(Qt.NoBrush)
+
+        if self._focus_mode_enabled and self._stable_boxes:
+            self._draw_focus_dim_layer(painter, self._stable_boxes)
 
         if self._show_raw_boxes:
             self._draw_boxes(
@@ -98,6 +116,24 @@ class DetectionOverlay(QWidget):
             )
 
         painter.end()
+
+    def toggle_raw_boxes(self) -> None:
+        """Toggle rendering of raw YOLO boxes."""
+        self._user_raw_override = True
+        self._show_raw_boxes = not self._show_raw_boxes
+        self.update()
+
+    def toggle_stable_boxes(self) -> None:
+        """Toggle rendering of stabilized boxes."""
+        self._user_stable_override = True
+        self._show_stable_boxes = not self._show_stable_boxes
+        self.update()
+
+    def toggle_focus_mode(self) -> None:
+        """Toggle dimming outside stabilized ROI boxes."""
+        self._user_focus_override = True
+        self._focus_mode_enabled = not self._focus_mode_enabled
+        self.update()
 
     def _draw_boxes(
         self,
@@ -133,3 +169,19 @@ class DetectionOverlay(QWidget):
             except (TypeError, ValueError):
                 return fallback
         return fallback
+
+    def _draw_focus_dim_layer(self, painter: QPainter, focus_boxes: List[Box]) -> None:
+        """Darken non-ROI regions while leaving ROI windows transparent."""
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, self._focus_dim_alpha))
+        painter.drawRect(self.rect())
+
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        for x1, y1, x2, y2, _ in focus_boxes:
+            lx1 = x1 - self._origin_x
+            ly1 = y1 - self._origin_y
+            width = max(1, x2 - x1)
+            height = max(1, y2 - y1)
+            painter.drawRoundedRect(lx1, ly1, width, height, 8.0, 8.0)
+
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
