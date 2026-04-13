@@ -1,0 +1,16 @@
+{
+  "enable_roi_stabilization": true,
+  "responsiveness": 0.35,
+  "realignment_threshold": 0.35,
+  "padding_scale": 0.18,
+  "padding_pixels": 12,
+  "positional_bias_x": 0.0,
+  "positional_bias_y": -0.08,
+  "prediction_enable": true,
+  "debug_visualization": false,
+  "yolo_box_approximation": true,
+  "iou_weight": 0.7,
+  "confidence_weight": 0.3,
+  "velocity_decay": 0.88,
+  "dropout_confidence_decay": 0.92
+}

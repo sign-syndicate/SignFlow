@@ -11,7 +11,10 @@ SignFlow/
 │   │   ├── __init__.py
 │   │   ├── capture.py      # Screen capture module
 │   │   ├── detection.py    # YOLO detection module
+│   │   ├── roi_stabilizer.py # ROI smoothing and prediction
 │   │   └── pipeline.py     # Main orchestrator
+│   ├── config/
+│   │   └── roi_stabilizer.json # Runtime tuning file
 │   ├── ui/                 # User interface
 │   │   ├── __init__.py
 │   │   └── overlay.py      # PyQt5 overlay
@@ -63,31 +66,49 @@ boxes = detector.detect_with_scores(frame, conf=0.35)
 ```
 
 #### `pipeline.py` - VisionPipeline
-- **Purpose**: Orchestrate capture + detection
+- **Purpose**: Orchestrate capture + detection + stabilization
 - **Key Class**: `VisionPipeline`
 - **How it works**:
   1. Captures frame via `ScreenCapture`
   2. Runs detection via `PersonDetector`
-  3. Converts box coordinates to screen space
-  4. Returns payload dict for rendering
+  3. Stabilizes detections using `ROIStabilizer`
+  4. Converts raw and stabilized box coordinates to screen space
+  5. Returns payload dict for rendering and downstream consumption
 
 **Usage**:
 ```python
 pipeline = VisionPipeline(model_path="models/yolov8n.pt")
 payload = pipeline.process_once()
-# Returns: {"boxes": [(x1_screen, y1_screen, x2_screen, y2_screen, conf), ...]}
+# Returns raw and stabilized streams plus active ROI metadata
+```
+
+#### `roi_stabilizer.py` - ROIStabilizer
+- **Purpose**: Maintain a stable ROI from noisy detections
+- **Key Classes**: `ROIStabilizer`, `ROIStabilizerConfig`
+- **How it works**:
+  1. Chooses the detection most consistent with the previous stable ROI
+  2. Applies padding and a configurable upward bias
+  3. Smooths motion with threshold-based realignment
+  4. Predicts through dropouts with a simple velocity model
+
+**Usage**:
+```python
+stabilizer = ROIStabilizer()
+stable_roi = stabilizer.update(detections, frame_size=(1920, 1080))
+active_roi = stabilizer.get_active_roi()
 ```
 
 ### UI Modules (`Code/ui/`)
 
 #### `overlay.py` - DetectionOverlay
-- **Purpose**: Draw detections on transparent overlay
+- **Purpose**: Draw raw and stabilized detections on transparent overlay
 - **Key Class**: `DetectionOverlay(QWidget)`
 - **How it works**:
   1. Creates frameless, transparent, click-through window
   2. Stays on top of all other windows
-  3. Receives payloads with detection boxes
-  4. Draws green rectangles with confidence labels
+  3. Receives payloads with raw and stabilized box streams
+  4. Draws raw detections in purple when debug mode is enabled
+  5. Draws stabilized boxes in green for the active overlay
 
 **Usage**:
 ```python
@@ -124,15 +145,17 @@ ScreenCapture.read() → BGR frame
   ↓
 PersonDetector.detect_with_scores() → boxes in frame-space
   ↓
-VisionPipeline.process_once() → convert to screen-space
+ROIStabilizer.update() → stable active ROI in frame-space
+   ↓
+VisionPipeline.process_once() → convert raw and stabilized boxes to screen-space
   ↓
-payload = {"boxes": [detections]}
+payload = {"raw_boxes": [...], "stable_boxes": [...], "active_roi": ...}
   ↓
 overlay.update_payload(payload)
   ↓
-DetectionOverlay.paintEvent() → draw to screen
+DetectionOverlay.paintEvent() → draw stabilized ROI, and raw boxes in debug mode
   ↓
-User sees green boxes on overlay
+User sees a stable green ROI on overlay
 ```
 
 ## Coordinate Spaces

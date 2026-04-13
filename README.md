@@ -1,6 +1,6 @@
 # SignFlow
 
-Real-time person detection overlay using YOLO and PyQt5.
+Real-time person detection overlay using YOLO and PyQt5, with a stateful ROI stabilizer for smoother tracking.
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The overlay will appear on your screen and detect everyone visible. Detections are drawn as green boxes with confidence scores.
+The overlay will appear on your screen and detect everyone visible. Stable detections are drawn as green boxes, and raw detections can be shown in purple when debug visualization is enabled.
 
 ## Architecture
 
@@ -21,7 +21,10 @@ Code/
 ├── core/
 │   ├── capture.py      # Screen capture (mss)
 │   ├── detection.py    # YOLO person detection
-│   └── pipeline.py     # Orchestrates capture + detection
+│   ├── roi_stabilizer.py # Stateful ROI smoothing and prediction
+│   └── pipeline.py     # Orchestrates capture + detection + stabilization
+├── config/
+│   └── roi_stabilizer.json # Runtime tuning values for ROI behavior
 ├── ui/
 │   └── overlay.py      # PyQt5 transparent overlay
 └── main.py             # Entry point + Qt event loop
@@ -34,7 +37,8 @@ Documents/
 
 1. **Capture**: Grabs frames from screen using `mss`
 2. **Detect**: Runs YOLO person detection on each frame
-3. **Render**: Draws green boxes on transparent overlay in real-time
+3. **Stabilize**: Smooths detections into a persistent active ROI
+4. **Render**: Draws stabilized boxes on transparent overlay in real-time
 
 That's it. Simple, fast, extensible.
 
@@ -43,6 +47,7 @@ That's it. Simple, fast, extensible.
 - **Code/** - All application logic (pure Python)
 - **Documents/** - Documentation and architecture notes
 - **models/** - YOLO model weights (auto-downloaded)
+- **config/** - Runtime ROI stabilization config
 
 ## Development
 
@@ -50,6 +55,7 @@ For beginners:
 - Start with `Code/main.py` - the entry point
 - Then look at `Code/core/pipeline.py` - the main logic
 - Each module is <100 lines and well-documented
+- `Code/config/roi_stabilizer.json` controls stabilization strength, padding, prediction, and debug output
 
 To extend:
 - Add new detection modules in `Code/core/`

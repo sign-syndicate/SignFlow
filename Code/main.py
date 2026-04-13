@@ -103,13 +103,14 @@ class PipelineWorker(QThread):
 
     result_ready = pyqtSignal(object)
 
-    def __init__(self, model_path: Path) -> None:
+    def __init__(self, model_path: Path, roi_config_path: Path) -> None:
         super().__init__()
         self._running = False
         self._pipeline = VisionPipeline(
             model_path=model_path,
             monitor_index=1,
             conf_threshold=0.35,
+            roi_config_path=roi_config_path,
         )
 
     def run(self) -> None:
@@ -128,7 +129,9 @@ def main() -> int:
     """Main application entry point."""
     # Setup
     model_path = Path(__file__).parent / "models" / "yolov8n.pt"
+    roi_config_path = Path(__file__).parent / "config" / "roi_stabilizer.json"
     model_path.parent.mkdir(parents=True, exist_ok=True)
+    roi_config_path.parent.mkdir(parents=True, exist_ok=True)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -153,7 +156,7 @@ def main() -> int:
     tray.setContextMenu(menu)
 
     # Create worker thread
-    worker = PipelineWorker(model_path=model_path)
+    worker = PipelineWorker(model_path=model_path, roi_config_path=roi_config_path)
     worker.result_ready.connect(overlay.update_payload)
 
     hotkey_bridge = HotKeyBridge()
