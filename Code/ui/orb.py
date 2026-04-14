@@ -13,10 +13,11 @@ class FloatingOrb(QWidget):
     BASE_DIAMETER = 56.0
     WIDGET_DIAMETER = 124
     AUTO_HIDE_DELAY_MS = 2600
-    DOCK_ANIMATION_MS = 230
+    DOCK_ANIMATION_MS = 260
     HIDDEN_VISIBLE_RATIO = 0.5
-    VISIBLE_OVERHANG_PX = 32
+    VISIBLE_OVERHANG_PX = 24
     REVEAL_DISTANCE = 120.0
+    HIDDEN_OPACITY = 0.70
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
@@ -33,9 +34,11 @@ class FloatingOrb(QWidget):
         self._positioned = False
         self._snap_animation = None
         self._dock_animation = None
+        self._opacity_animation = None
         self._border_phase = 0.0
         self._cursor_proximity = 0.0
         self._click_flash = 0.0
+        self._display_opacity = 1.0
         self._dock_side = "right"
         self._dock_hidden = False
         self._idle_timer = QTimer(self)
@@ -107,6 +110,15 @@ class FloatingOrb(QWidget):
 
     clickFlash = pyqtProperty(float, fget=getClickFlash, fset=setClickFlash)
 
+    def getDisplayOpacity(self) -> float:
+        return self._display_opacity
+
+    def setDisplayOpacity(self, value: float):
+        self._display_opacity = max(self.HIDDEN_OPACITY, min(1.0, float(value)))
+        self.update()
+
+    displayOpacity = pyqtProperty(float, fget=getDisplayOpacity, fset=setDisplayOpacity)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not self._positioned:
@@ -133,6 +145,7 @@ class FloatingOrb(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.fillRect(self.rect(), Qt.transparent)
+        painter.setOpacity(self._display_opacity)
 
         center = QPointF(self.rect().center()) + self._magnet_offset
         effective_scale = self._scale * (1.0 + 0.05 * self._hover_progress)
@@ -286,11 +299,11 @@ class FloatingOrb(QWidget):
             return
 
         geometry = screen.availableGeometry()
-        x = geometry.x() + geometry.width() - self.width()
         y = geometry.y() + (geometry.height() - self.height()) // 2
         self._dock_side = "right"
         self._dock_hidden = False
-        self.move(self._clamp_to_screen(QPoint(x, y), screen))
+        start_position = self._dock_visible_target(screen)
+        self.move(QPoint(start_position.x(), self._clamp_y(y, geometry)))
         self._positioned = True
         self._reset_idle_timer()
         if self._debug:
@@ -303,14 +316,11 @@ class FloatingOrb(QWidget):
 
         geometry = screen.availableGeometry()
         current = self.pos()
-        left_target = geometry.x()
-        right_target = geometry.x() + geometry.width() - self.width()
-        target_x = left_target if current.x() + (self.width() / 2.0) < geometry.center().x() else right_target
-        target_y = self._clamp_y(current.y(), geometry)
-        target = QPoint(target_x, target_y)
+        self._dock_side = "left" if current.x() + (self.width() / 2.0) < geometry.center().x() else "right"
+        target = self._dock_visible_target(screen)
+        target.setY(self._clamp_y(current.y(), geometry))
 
         self._stop_snap_animation()
-        self._dock_side = "left" if target_x == left_target else "right"
         self._animate_to_position(target, self.DOCK_ANIMATION_MS, QEasingCurve.OutCubic, use_snap_animation=True)
 
     def _on_snap_finished(self):
@@ -330,6 +340,12 @@ class FloatingOrb(QWidget):
             self._dock_animation.stop()
             self._dock_animation.deleteLater()
             self._dock_animation = None
+
+    def _stop_opacity_animation(self):
+        if self._opacity_animation is not None:
+            self._opacity_animation.stop()
+            self._opacity_animation.deleteLater()
+            self._opacity_animation = None
 
     def _animate_to_position(self, target: QPoint, duration: int, easing, use_snap_animation: bool = False):
         if use_snap_animation:
@@ -395,6 +411,20 @@ class FloatingOrb(QWidget):
 
         target = self._dock_visible_target(screen) if visible else self._dock_hidden_target(screen)
         self._animate_to_position(target, self.DOCK_ANIMATION_MS, QEasingCurve.OutCubic)
+        self._animate_display_opacity(1.0 if visible else self.HIDDEN_OPACITY)
+
+    def _animate_display_opacity(self, target_opacity: float):
+        self._stop_opacity_animation()
+        self._opacity_animation = QPropertyAnimation(self, b"displayOpacity", self)
+        self._opacity_animation.setDuration(self.DOCK_ANIMATION_MS)
+        self._opacity_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._opacity_animation.setStartValue(self._display_opacity)
+        self._opacity_animation.setEndValue(float(target_opacity))
+        self._opacity_animation.finished.connect(self._on_opacity_animation_finished)
+        self._opacity_animation.start()
+
+    def _on_opacity_animation_finished(self):
+        self._stop_opacity_animation()
 
     def _dock_visible_target(self, screen) -> QPoint:
         geometry = screen.availableGeometry()
@@ -434,7 +464,7 @@ class FloatingOrb(QWidget):
         return QPoint(x, center_y)
 
     def _update_magnetic_offset(self):
-        self._border_phase = (self._border_phase + 0.95 + (self._cursor_proximity * 0.35)) % 360.0
+        self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
 
         if self._dragging:
             if self._magnet_offset != QPointF(0.0, 0.0):
@@ -462,6 +492,12 @@ class FloatingOrb(QWidget):
                 scale = min(7.0, 7.0 * (strength ** 1.15))
                 target = QPointF((delta.x() / distance) * scale, (delta.y() / distance) * scale)
 
+            # Never allow magnetic motion to push the orb closer into its docked edge.
+            if self._dock_side == "right":
+                target.setX(min(0.0, target.x()))
+            else:
+                target.setX(max(0.0, target.x()))
+
             current = self._magnet_offset
             next_offset = QPointF(
                 current.x() + (target.x() - current.x()) * 0.14,
@@ -477,9 +513,13 @@ class FloatingOrb(QWidget):
     def _draw_border_segments(self, painter: QPainter, orb_rect: QRectF, center: QPointF):
         border_rect = orb_rect.adjusted(-4.2, -4.2, 4.2, 4.2)
         ring_width = 2.3 if self._theme.name == "APPLE" else 2.05
-        segment_span = 24.0
-        slots = 4
+        segment_span = 13.0
+        slots = 8
         phase = self._border_phase % 360.0
+        interaction_level = max(self._hover_progress, self._cursor_proximity, self._click_flash)
+        alpha_multiplier = 0.50 + (interaction_level * 0.72)
+        if self._dock_hidden:
+            alpha_multiplier *= 0.84
 
         if self._theme.name == "APPLE":
             base_colors = [
@@ -511,7 +551,7 @@ class FloatingOrb(QWidget):
             distance_to_secondary = min(abs(angle - ((phase + 180.0) % 360.0)), 360.0 - abs(angle - ((phase + 180.0) % 360.0)))
             primary_mix = max(0.0, 1.0 - (distance_to_primary / 54.0))
             secondary_mix = max(0.0, 1.0 - (distance_to_secondary / 54.0))
-            brightness = min(1.0, 0.42 + (primary_mix * 0.58) + (secondary_mix * 0.22))
+            brightness = min(1.0, 0.50 + (primary_mix * 0.50) + (secondary_mix * 0.18))
 
             if self._theme.name == "APPLE":
                 if primary_mix > 0.65:
@@ -529,7 +569,7 @@ class FloatingOrb(QWidget):
                     color = base_colors[index % len(base_colors)]
 
             color = QColor(color)
-            color.setAlphaF(max(0.18, min(1.0, color.alphaF() * brightness)))
+            color.setAlphaF(max(0.22, min(1.0, color.alphaF() * brightness * alpha_multiplier)))
             pen = QPen(color, ring_width)
             pen.setCapStyle(Qt.RoundCap)
             painter.setPen(pen)

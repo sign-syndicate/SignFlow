@@ -7,6 +7,9 @@ class Theme:
     base_color: str
     glow_color: str
     hover_color: str
+    tray_fill_color: str
+    tray_border_color: str
+    tray_highlight_color: str
     opacity_idle: float
     opacity_hover: float
     shadow_strength: float
@@ -18,6 +21,9 @@ THEMES = {
         base_color="#F3EFE8",
         glow_color="#D7D2C8",
         hover_color="#FFFFFF",
+        tray_fill_color="#EDEDEA",
+        tray_border_color="#656565",
+        tray_highlight_color="#FFFFFF",
         opacity_idle=0.84,
         opacity_hover=0.97,
         shadow_strength=0.22,
@@ -27,6 +33,9 @@ THEMES = {
         base_color="#0E141A",
         glow_color="#35F0C6",
         hover_color="#8B6CFF",
+        tray_fill_color="#131B22",
+        tray_border_color="#9EF3DE",
+        tray_highlight_color="#D2C2FF",
         opacity_idle=0.9,
         opacity_hover=1.0,
         shadow_strength=0.42,

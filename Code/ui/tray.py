@@ -1,69 +1,57 @@
-from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import QAction, QMenu, QSystemTrayIcon
 
 from ..core.theme import Theme
 
 
-def build_tray_icon(theme: Theme) -> QIcon:
-    pixmap = QPixmap(96, 96)
+def _draw_icon_pixmap(theme: Theme, size: int) -> QPixmap:
+    pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    center = QPointF(48.0, 48.0)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-    glow_color = QColor(theme.glow_color)
-    glow_color.setAlphaF(0.40 if theme.name == "APPLE" else 0.54)
-    glow = QRadialGradient(center, 30)
-    glow.setColorAt(0.0, glow_color)
-    glow.setColorAt(0.55, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 40))
-    glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+    margin = max(2, int(round(size * 0.16)))
+    diameter = size - (margin * 2)
+    border_width = max(1, int(round(size * 0.10)))
+    inner_margin = border_width + max(1, int(round(size * 0.04)))
+
     painter.setPen(Qt.NoPen)
-    painter.setBrush(glow)
-    painter.drawEllipse(center, 25, 25)
+    painter.setBrush(QColor(theme.tray_fill_color))
+    painter.drawEllipse(margin, margin, diameter, diameter)
 
-    if theme.name == "APPLE":
-        shell = QRadialGradient(center - QPointF(3.0, 4.0), 22)
-        shell.setColorAt(0.0, QColor(255, 255, 255, 248))
-        shell.setColorAt(0.56, QColor(238, 238, 236, 240))
-        shell.setColorAt(1.0, QColor(198, 198, 196, 255))
-    else:
-        shell = QRadialGradient(center - QPointF(3.0, 4.0), 22)
-        shell.setColorAt(0.0, QColor(28, 35, 41, 255))
-        shell.setColorAt(0.62, QColor(12, 17, 22, 250))
-        shell.setColorAt(1.0, QColor(6, 9, 12, 255))
-    painter.setBrush(shell)
-    painter.drawEllipse(center, 20, 20)
-
-    ring_color = QColor("#A7A7A7") if theme.name == "APPLE" else QColor(theme.glow_color)
-    ring_color.setAlphaF(0.95 if theme.name == "APPLE" else 0.85)
-    ring_pen = QPen(ring_color, 2.1)
-    ring_pen.setCapStyle(Qt.RoundCap)
-    ring_pen.setJoinStyle(Qt.RoundJoin)
-    painter.setPen(ring_pen)
+    border_pen = QPen(QColor(theme.tray_border_color))
+    border_pen.setWidth(border_width)
+    border_pen.setCapStyle(Qt.RoundCap)
+    border_pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(border_pen)
     painter.setBrush(Qt.NoBrush)
-    painter.drawEllipse(center, 20, 20)
+    painter.drawEllipse(margin, margin, diameter, diameter)
 
-    accent = QColor(theme.hover_color if theme.name != "APPLE" else "#F6F6F6")
-    accent.setAlphaF(0.9 if theme.name != "APPLE" else 0.75)
-    accent_pen = QPen(accent, 1.1)
-    accent_pen.setCapStyle(Qt.RoundCap)
-    painter.setPen(accent_pen)
-    painter.drawArc(28, 28, 40, 40, 30 * 16, 70 * 16)
-    painter.drawArc(28, 28, 40, 40, 210 * 16, 70 * 16)
-
-    if theme.name == "APPLE":
-        dot = QRadialGradient(center - QPointF(6.0, 6.0), 8)
-        dot.setColorAt(0.0, QColor(255, 255, 255, 170))
-        dot.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(dot)
-        painter.drawEllipse(center - QPointF(7.0, 7.0), 14, 14)
+    highlight_pen = QPen(QColor(theme.tray_highlight_color))
+    highlight_pen.setWidth(max(1, border_width - 1))
+    highlight_pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(highlight_pen)
+    painter.drawArc(
+        margin + inner_margin,
+        margin + inner_margin,
+        diameter - (inner_margin * 2),
+        diameter - (inner_margin * 2),
+        24 * 16,
+        64 * 16,
+    )
 
     painter.end()
+    return pixmap
 
-    return QIcon(pixmap)
+
+def build_tray_icon(theme: Theme) -> QIcon:
+    icon = QIcon()
+    for size in (16, 20, 24, 32, 40, 48, 64):
+        icon.addPixmap(_draw_icon_pixmap(theme, size))
+    return icon
 
 
 class SystemTrayController:
