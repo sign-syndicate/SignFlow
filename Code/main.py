@@ -26,11 +26,13 @@ def main():
     def _on_selection_cancelled():
         if config.debug:
             print("selection cancelled")
+        orb.setForcedHiddenMode(False)
         selector["widget"] = None
 
     def _on_roi_confirmed(x: int, y: int, w: int, h: int):
         if config.debug:
             print(f"stored roi: {x}, {y}, {w}, {h}")
+        orb.setForcedHiddenMode(False)
         selector["widget"] = None
 
     def _open_selector_overlay():
@@ -40,11 +42,13 @@ def main():
 
         orb.show()
         orb.raise_()
-        orb.enterHiddenDockMode()
+        orb.setForcedHiddenMode(True)
         overlay = RoiSelectorOverlay(theme, debug=config.debug)
         overlay.roi_confirmed.connect(_on_roi_confirmed)
         overlay.selection_cancelled.connect(_on_selection_cancelled)
+        overlay.release_orb_lock.connect(lambda: orb.setForcedHiddenMode(False))
         overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
+        overlay.destroyed.connect(lambda *_: orb.setForcedHiddenMode(False))
         selector["widget"] = overlay
         overlay.start()
 

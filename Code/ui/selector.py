@@ -18,6 +18,7 @@ from ..core.theme import Theme, resolve_primary_light_color
 class RoiSelectorOverlay(QWidget):
     roi_confirmed = pyqtSignal(int, int, int, int)
     selection_cancelled = pyqtSignal()
+    release_orb_lock = pyqtSignal()
 
     CONFIRMATION_MS = 3000
     FADE_IN_MS = 180
@@ -305,6 +306,8 @@ class RoiSelectorOverlay(QWidget):
         self._completion_inset_anim.setEndValue(2.0)
         self._completion_fade_anim.setStartValue(self._overlay_opacity)
         self._completion_fade_anim.setEndValue(0.0)
+        # Allow orb interaction to resume slightly before overlay fully disappears.
+        self.release_orb_lock.emit()
         self._completion_inset_anim.start()
         self._completion_fade_anim.start()
 
@@ -330,6 +333,7 @@ class RoiSelectorOverlay(QWidget):
         self._fade_in_anim.stop()
         self._clear_roi()
         self._set_state("idle")
+        self.release_orb_lock.emit()
         self.selection_cancelled.emit()
         self.close()
 

@@ -43,6 +43,7 @@ class FloatingOrb(QWidget):
         self._display_opacity = 1.0
         self._dock_side = "right"
         self._dock_hidden = False
+        self._forced_hidden_mode = False
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.setInterval(self.AUTO_HIDE_DELAY_MS)
@@ -127,6 +128,24 @@ class FloatingOrb(QWidget):
         self._dock_hidden = True
         self._animate_dock_visibility(False)
 
+    def setForcedHiddenMode(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled == self._forced_hidden_mode:
+            return
+
+        self._forced_hidden_mode = enabled
+        if enabled:
+            self._dragging = False
+            self._drag_threshold_exceeded = False
+            self._set_hover_state(False)
+            self._cursor_proximity = 0.0
+            self._magnet_offset = QPointF(0.0, 0.0)
+            self.enterHiddenDockMode()
+            self.update()
+            return
+
+        self._reset_idle_timer()
+
     displayOpacity = pyqtProperty(float, fget=getDisplayOpacity, fset=setDisplayOpacity)
 
     def showEvent(self, event):
@@ -140,12 +159,18 @@ class FloatingOrb(QWidget):
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
 
     def enterEvent(self, event):
+        if self._forced_hidden_mode:
+            super().enterEvent(event)
+            return
         self._animate_hover(True)
         self._reveal_from_edge()
         self._reset_idle_timer()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
+        if self._forced_hidden_mode:
+            super().leaveEvent(event)
+            return
         self._animate_hover(False)
         self._reset_idle_timer()
         super().leaveEvent(event)
@@ -227,6 +252,9 @@ class FloatingOrb(QWidget):
             painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
     def mousePressEvent(self, event):
+        if self._forced_hidden_mode:
+            event.ignore()
+            return
         if event.button() != Qt.LeftButton:
             event.ignore()
             return
@@ -245,6 +273,9 @@ class FloatingOrb(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event):
+        if self._forced_hidden_mode:
+            event.ignore()
+            return
         if not self._dragging:
             event.ignore()
             return
@@ -262,6 +293,9 @@ class FloatingOrb(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        if self._forced_hidden_mode:
+            event.ignore()
+            return
         if event.button() != Qt.LeftButton:
             event.ignore()
             return
@@ -387,6 +421,8 @@ class FloatingOrb(QWidget):
             self._idle_timer.stop()
 
     def _reset_idle_timer(self):
+        if self._forced_hidden_mode:
+            return
         if self._dragging:
             return
         if self._under_active_interaction():
@@ -398,6 +434,8 @@ class FloatingOrb(QWidget):
         return self.underMouse() or self._hover_progress > 0.01
 
     def _auto_hide_if_idle(self):
+        if self._forced_hidden_mode:
+            return
         if self._dragging or self._under_active_interaction() or self._cursor_near_orb():
             self._reset_idle_timer()
             return
@@ -407,6 +445,8 @@ class FloatingOrb(QWidget):
         self._animate_dock_visibility(False)
 
     def _reveal_from_edge(self):
+        if self._forced_hidden_mode:
+            return
         if self._dragging:
             return
         if not self._dock_hidden:
@@ -474,6 +514,14 @@ class FloatingOrb(QWidget):
         return QPoint(x, center_y)
 
     def _update_magnetic_offset(self):
+        if self._forced_hidden_mode:
+            if self._magnet_offset != QPointF(0.0, 0.0):
+                self._magnet_offset = QPointF(0.0, 0.0)
+            if abs(self._cursor_proximity) > 0.001:
+                self._cursor_proximity = 0.0
+            self.update()
+            return
+
         self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
 
         if self._dragging:
