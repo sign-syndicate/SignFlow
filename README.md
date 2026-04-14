@@ -1,6 +1,6 @@
 # SignFlow
 
-Minimal assistive desktop UI built with PyQt5.
+Minimal desktop baseline built with PyQt5.
 
 ## Quick Start
 
@@ -11,35 +11,34 @@ python main.py
 
 ## What It Does
 
-SignFlow presents a floating orb that expands into a clean caption panel, dims the desktop, and lets the user select a region of interest. The current build focuses only on UI behavior and interaction polish.
+The current project is a clean restart baseline.
+
+It runs as a system tray application with a minimal menu:
+
+- Start (no-op, prints to console)
+- Exit (quits the app)
+
+No floating windows, overlays, or animation systems are included in this reset.
 
 ## Architecture
 
 ```
 Code/
 ├── core/
-│   ├── config.py        # UI tuning values and shared copy
-│   └── state_manager.py  # Single source of truth for UI state
-├── ui/
-│   ├── border.py         # Animated border rendering helpers
-│   ├── orb.py           # Floating docked orb widget
-│   ├── panel.py         # Caption panel and morph animation
-│   ├── selector.py      # Full-screen region selector overlay
-│   ├── tray.py          # System tray controller
-│   └── overlay.py       # Top-level UI coordinator
+│   ├── config.py         # Minimal runtime config
+│   └── state_manager.py  # Minimal state holder (idle baseline)
 └── main.py              # PyQt5 entry point
 
 Documents/
 └── architecture.md
 ```
 
-## Behavior
+## Current Behavior
 
-1. The orb sits on the screen edge and can be dragged or clicked.
-2. Clicking the orb expands it into a rounded caption panel.
-3. The desktop dims and the user selects a region.
-4. On selection, the app enters an active captioning state.
-5. The tray menu provides Open and Exit.
+1. Launches QApplication.
+2. Creates a QSystemTrayIcon.
+3. Provides Start and Exit menu actions.
+4. Keeps app alive in the tray until Exit.
 
 ## License
 

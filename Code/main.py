@@ -1,11 +1,11 @@
 import sys
 
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QAction, QMenu, QStyle, QSystemTrayIcon
 
 from .core.config import AppConfig
 from .core.state_manager import AppStateManager
-from .ui.overlay import SignFlowOverlay
-from .ui.tray import SystemTrayController
 
 
 def main():
@@ -14,13 +14,32 @@ def main():
     app.setApplicationName(config.app_name)
     app.setQuitOnLastWindowClosed(False)
 
-    state_manager = AppStateManager(config)
-    overlay = SignFlowOverlay(config, state_manager)
-    tray = SystemTrayController(config)
-    tray.open_requested.connect(overlay.show)
-    tray.exit_requested.connect(overlay.exit_application)
+    _state_manager = AppStateManager()
 
-    overlay.show()
+    icon = QIcon()
+    style = app.style()
+    if style is not None:
+        icon = style.standardIcon(QStyle.SP_ComputerIcon)
+
+    tray = QSystemTrayIcon(icon, app)
+    tray.setToolTip(config.app_name)
+
+    menu = QMenu()
+    start_action = QAction("Start", menu)
+    exit_action = QAction("Exit", menu)
+
+    def _start_noop():
+        print("SignFlow: Start clicked")
+
+    start_action.triggered.connect(_start_noop)
+    exit_action.triggered.connect(app.quit)
+    menu.addAction(start_action)
+    menu.addSeparator()
+    menu.addAction(exit_action)
+
+    tray.setContextMenu(menu)
+    tray.show()
+
     sys.exit(app.exec_())
 
 

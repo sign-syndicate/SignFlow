@@ -1,32 +1,22 @@
 # SignFlow Architecture
 
-This rebuild is a minimal UI-only desktop shell for an assistive captioning app.
+This repository is currently in a hard-reset baseline state.
 
 ## Current Build
 
-The application is organized around a small state-driven PyQt5 UI stack:
+The runtime is intentionally minimal:
 
-- `Code/core/config.py` stores shared UI constants and copy.
-- `Code/core/state_manager.py` is the single source of truth for UI state, ROI, dock edge, and caption text.
-- `Code/ui/orb.py` implements the floating docked orb.
-- `Code/ui/panel.py` implements the morphing caption panel.
-- `Code/ui/selector.py` implements the dimmed region selection overlay.
-- `Code/ui/border.py` renders the animated state border.
-- `Code/ui/tray.py` provides the system tray entry points.
-- `Code/ui/overlay.py` coordinates widget transitions and state reactions.
-- `Code/main.py` launches the Qt application.
+- `Code/main.py` starts a tray-only application.
+- `Code/core/config.py` contains minimal app configuration.
+- `Code/core/state_manager.py` contains minimal state handling.
 
-## State Flow
+## State Model
 
-1. `idle`
-2. `panel_open`
-3. `selecting`
-4. `active`
+- Current state baseline: `idle`
 
-The state manager emits changes, and the UI reacts through signals and slots. The widgets never own the source of truth for state.
+No UI transition graph is active in this reset.
 
 ## Notes
 
-- No ML, MediaPipe, or inference pipeline is included in this layer.
-- The tray menu should close the application fully only through Exit.
-- The panel close button collapses back to the orb instead of quitting.
+- All previous UI modules under `Code/ui/` were removed as part of hard reset.
+- This baseline exists to support incremental rebuild from a stable tray runtime.
