@@ -388,7 +388,7 @@ class FloatingOrb(QWidget):
         return self.underMouse() or self._hover_progress > 0.01
 
     def _auto_hide_if_idle(self):
-        if self._dragging or self._under_active_interaction():
+        if self._dragging or self._under_active_interaction() or self._cursor_near_orb():
             self._reset_idle_timer()
             return
         if self._dock_hidden:
@@ -522,27 +522,10 @@ class FloatingOrb(QWidget):
             alpha_multiplier *= 0.84
 
         if self._theme.name == "APPLE":
-            base_colors = [
-                QColor(232, 232, 232, 232),
-                QColor(196, 196, 196, 186),
-                QColor(166, 166, 166, 220),
-                QColor(202, 202, 202, 180),
-            ]
-            accent_colors = [
-                QColor(255, 255, 255, 242),
-                QColor(212, 212, 212, 228),
-            ]
+            border_color = QColor(221, 221, 221, 232)
         else:
-            base_colors = [
-                QColor(self._theme.glow_color),
-                QColor(self._theme.hover_color),
-                QColor(255, 255, 255, 52),
-                QColor(self._theme.glow_color),
-            ]
-            accent_colors = [
-                QColor(self._theme.hover_color),
-                QColor(self._theme.glow_color),
-            ]
+            border_color = QColor(self._theme.glow_color)
+            border_color.setAlpha(236)
 
         painter.setBrush(Qt.NoBrush)
         for index in range(slots):
@@ -553,22 +536,7 @@ class FloatingOrb(QWidget):
             secondary_mix = max(0.0, 1.0 - (distance_to_secondary / 54.0))
             brightness = min(1.0, 0.50 + (primary_mix * 0.50) + (secondary_mix * 0.18))
 
-            if self._theme.name == "APPLE":
-                if primary_mix > 0.65:
-                    color = accent_colors[0]
-                elif secondary_mix > 0.65:
-                    color = accent_colors[1]
-                else:
-                    color = base_colors[index % len(base_colors)]
-            else:
-                if primary_mix > 0.65:
-                    color = accent_colors[0]
-                elif secondary_mix > 0.65:
-                    color = accent_colors[1]
-                else:
-                    color = base_colors[index % len(base_colors)]
-
-            color = QColor(color)
+            color = QColor(border_color)
             color.setAlphaF(max(0.22, min(1.0, color.alphaF() * brightness * alpha_multiplier)))
             pen = QPen(color, ring_width)
             pen.setCapStyle(Qt.RoundCap)
