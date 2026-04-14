@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt5.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty
+from PyQt5.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty, pyqtSignal
 from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient
 from PyQt5.QtWidgets import QApplication, QWidget
 
@@ -10,6 +10,8 @@ from ..core.theme import Theme
 
 
 class FloatingOrb(QWidget):
+    activated = pyqtSignal()
+
     BASE_DIAMETER = 56.0
     WIDGET_DIAMETER = 124
     AUTO_HIDE_DELAY_MS = 2600
@@ -262,7 +264,7 @@ class FloatingOrb(QWidget):
         self._drag_threshold_exceeded = False
 
         if not dragged:
-            print("orb clicked")
+            self.activated.emit()
             self._reveal_from_edge()
         elif was_dragging:
             self._snap_to_nearest_edge()
