@@ -1,5 +1,6 @@
 import sys
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
 
 from .core.config import AppConfig
@@ -26,31 +27,25 @@ def main():
     def _on_selection_cancelled():
         if config.debug:
             print("selection cancelled")
-        orb.setForcedHiddenMode(False)
         selector["widget"] = None
 
     def _on_roi_confirmed(x: int, y: int, w: int, h: int):
         if config.debug:
             print(f"stored roi: {x}, {y}, {w}, {h}")
-        orb.setForcedHiddenMode(False)
         selector["widget"] = None
+
+    overlay = RoiSelectorOverlay(theme, debug=config.debug)
+    overlay.roi_confirmed.connect(_on_roi_confirmed)
+    overlay.selection_cancelled.connect(_on_selection_cancelled)
+    overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
+    selector["widget"] = overlay
 
     def _open_selector_overlay():
         active_selector = selector["widget"]
         if active_selector is not None and active_selector.isVisible():
             return
 
-        orb.show()
-        orb.raise_()
-        orb.setForcedHiddenMode(True)
-        overlay = RoiSelectorOverlay(theme, debug=config.debug)
-        overlay.roi_confirmed.connect(_on_roi_confirmed)
-        overlay.selection_cancelled.connect(_on_selection_cancelled)
-        overlay.release_orb_lock.connect(lambda: orb.setForcedHiddenMode(False))
-        overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
-        overlay.destroyed.connect(lambda *_: orb.setForcedHiddenMode(False))
-        selector["widget"] = overlay
-        overlay.start()
+        QTimer.singleShot(0, overlay.start)
 
     orb.activated.connect(_open_selector_overlay)
     orb.show()

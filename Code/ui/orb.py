@@ -29,6 +29,7 @@ class FloatingOrb(QWidget):
         self._hover_progress = 0.0
         self._magnet_offset = QPointF(0.0, 0.0)
         self._dragging = False
+        self._pressing = False
         self._press_global = QPoint()
         self._press_window_pos = QPoint()
         self._drag_threshold_exceeded = False
@@ -43,7 +44,6 @@ class FloatingOrb(QWidget):
         self._display_opacity = 1.0
         self._dock_side = "right"
         self._dock_hidden = False
-        self._forced_hidden_mode = False
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.setInterval(self.AUTO_HIDE_DELAY_MS)
@@ -123,29 +123,6 @@ class FloatingOrb(QWidget):
     def animateDisplayOpacity(self, target_opacity: float, duration: int | None = None):
         self._animate_display_opacity(target_opacity, duration)
 
-    def enterHiddenDockMode(self):
-        self._cancel_idle_timer()
-        self._dock_hidden = True
-        self._animate_dock_visibility(False)
-
-    def setForcedHiddenMode(self, enabled: bool):
-        enabled = bool(enabled)
-        if enabled == self._forced_hidden_mode:
-            return
-
-        self._forced_hidden_mode = enabled
-        if enabled:
-            self._dragging = False
-            self._drag_threshold_exceeded = False
-            self._set_hover_state(False)
-            self._cursor_proximity = 0.0
-            self._magnet_offset = QPointF(0.0, 0.0)
-            self.enterHiddenDockMode()
-            self.update()
-            return
-
-        self._reset_idle_timer()
-
     displayOpacity = pyqtProperty(float, fget=getDisplayOpacity, fset=setDisplayOpacity)
 
     def showEvent(self, event):
@@ -159,18 +136,12 @@ class FloatingOrb(QWidget):
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
 
     def enterEvent(self, event):
-        if self._forced_hidden_mode:
-            super().enterEvent(event)
-            return
         self._animate_hover(True)
         self._reveal_from_edge()
         self._reset_idle_timer()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if self._forced_hidden_mode:
-            super().leaveEvent(event)
-            return
         self._animate_hover(False)
         self._reset_idle_timer()
         super().leaveEvent(event)
@@ -252,31 +223,23 @@ class FloatingOrb(QWidget):
             painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
     def mousePressEvent(self, event):
-        if self._forced_hidden_mode:
-            event.ignore()
-            return
         if event.button() != Qt.LeftButton:
             event.ignore()
             return
 
-        self._dragging = True
+        self._dragging = False
         self._drag_threshold_exceeded = False
+        self._pressing = True
         self._press_global = event.globalPos()
         self._press_window_pos = self.pos()
         self._stop_snap_animation()
         self._stop_dock_animation()
         self._magnet_offset = QPointF(0.0, 0.0)
-        self._reveal_from_edge()
-        self._dock_hidden = False
         self._cancel_idle_timer()
-        self._trigger_click_flash()
         event.accept()
 
     def mouseMoveEvent(self, event):
-        if self._forced_hidden_mode:
-            event.ignore()
-            return
-        if not self._dragging:
+        if not self._pressing:
             event.ignore()
             return
 
@@ -284,6 +247,11 @@ class FloatingOrb(QWidget):
         if delta.manhattanLength() >= self._drag_start_distance:
             self._drag_threshold_exceeded = True
 
+        if not self._drag_threshold_exceeded:
+            event.accept()
+            return
+
+        self._dragging = True
         target = self._press_window_pos + delta
         screen = self._screen_for_point(event.globalPos())
         target = self._clamp_to_screen(target, screen)
@@ -293,9 +261,6 @@ class FloatingOrb(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
-        if self._forced_hidden_mode:
-            event.ignore()
-            return
         if event.button() != Qt.LeftButton:
             event.ignore()
             return
@@ -303,11 +268,11 @@ class FloatingOrb(QWidget):
         was_dragging = self._dragging
         dragged = self._drag_threshold_exceeded
         self._dragging = False
+        self._pressing = False
         self._drag_threshold_exceeded = False
 
         if not dragged:
-            self.activated.emit()
-            self._reveal_from_edge()
+            QTimer.singleShot(0, self.activated.emit)
         elif was_dragging:
             self._snap_to_nearest_edge()
         self._reset_idle_timer()
@@ -421,8 +386,6 @@ class FloatingOrb(QWidget):
             self._idle_timer.stop()
 
     def _reset_idle_timer(self):
-        if self._forced_hidden_mode:
-            return
         if self._dragging:
             return
         if self._under_active_interaction():
@@ -434,8 +397,6 @@ class FloatingOrb(QWidget):
         return self.underMouse() or self._hover_progress > 0.01
 
     def _auto_hide_if_idle(self):
-        if self._forced_hidden_mode:
-            return
         if self._dragging or self._under_active_interaction() or self._cursor_near_orb():
             self._reset_idle_timer()
             return
@@ -445,8 +406,6 @@ class FloatingOrb(QWidget):
         self._animate_dock_visibility(False)
 
     def _reveal_from_edge(self):
-        if self._forced_hidden_mode:
-            return
         if self._dragging:
             return
         if not self._dock_hidden:
@@ -455,7 +414,7 @@ class FloatingOrb(QWidget):
         self._animate_dock_visibility(True)
 
     def _animate_dock_visibility(self, visible: bool):
-        screen = self._screen_for_point(QCursor.pos())
+        screen = self._screen_for_point(self._orb_center_point())
         if screen is None:
             return
 
@@ -479,20 +438,19 @@ class FloatingOrb(QWidget):
     def _dock_visible_target(self, screen) -> QPoint:
         geometry = screen.availableGeometry()
         y = self._clamp_y(self.pos().y(), geometry)
+        overhang = int(self.VISIBLE_OVERHANG_PX)
         if self._dock_side == "left":
-            x = geometry.x() - self.VISIBLE_OVERHANG_PX
+            x = geometry.left() - overhang
         else:
-            x = geometry.x() + geometry.width() - self.width() + self.VISIBLE_OVERHANG_PX
+            # right() is inclusive; add +1 to convert to width-style boundary before applying overhang.
+            x = geometry.right() - self.width() + 1 + overhang
         return QPoint(x, y)
 
     def _dock_hidden_target(self, screen) -> QPoint:
         geometry = screen.availableGeometry()
         y = self._clamp_y(self.pos().y(), geometry)
-        visible_width = max(18, int(round(self.width() * self.HIDDEN_VISIBLE_RATIO)))
-        if self._dock_side == "left":
-            x = geometry.x() - (self.width() - visible_width)
-        else:
-            x = geometry.x() + geometry.width() - visible_width
+        visible_width = self._visible_width_for_hidden_state()
+        x = self._docked_x_for_visible_width(geometry, visible_width)
         return QPoint(x, y)
 
     def _cursor_near_orb(self) -> bool:
@@ -506,23 +464,28 @@ class FloatingOrb(QWidget):
         if not self._dock_hidden:
             return QPoint(self.pos().x() + self.width() // 2, center_y)
 
-        visible_width = max(18, int(round(self.width() * self.HIDDEN_VISIBLE_RATIO)))
+        visible_width = self._visible_width_for_hidden_state()
         if self._dock_side == "left":
             x = self.pos().x() + self.width() - visible_width // 2
         else:
             x = self.pos().x() + visible_width // 2
         return QPoint(x, center_y)
 
+    def _visible_width_for_hidden_state(self) -> int:
+        return max(18, int(round(self.width() * self.HIDDEN_VISIBLE_RATIO)))
+
+    def _docked_x_for_visible_width(self, geometry, visible_width: int) -> int:
+        visible_width = max(1, min(int(visible_width), self.width()))
+        if self._dock_side == "left":
+            return geometry.x() - (self.width() - visible_width)
+        return geometry.x() + geometry.width() - visible_width
+
     def _update_magnetic_offset(self):
-        if self._forced_hidden_mode:
-            if self._magnet_offset != QPointF(0.0, 0.0):
-                self._magnet_offset = QPointF(0.0, 0.0)
-            if abs(self._cursor_proximity) > 0.001:
-                self._cursor_proximity = 0.0
+        self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
+
+        if self._pressing and not self._dragging:
             self.update()
             return
-
-        self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
 
         if self._dragging:
             if self._magnet_offset != QPointF(0.0, 0.0):
@@ -615,3 +578,6 @@ class FloatingOrb(QWidget):
         if screen is None:
             screen = QGuiApplication.primaryScreen()
         return screen
+
+    def _orb_center_point(self) -> QPoint:
+        return QPoint(self.pos().x() + (self.width() // 2), self.pos().y() + (self.height() // 2))
