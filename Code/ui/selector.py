@@ -21,8 +21,8 @@ class RoiSelectorOverlay(QWidget):
 
     CONFIRMATION_MS = 3000
     FADE_IN_MS = 180
-    COMPLETION_INSET_MS = 90
-    COMPLETION_FADE_MS = 170
+    COMPLETION_INSET_MS = 180
+    COMPLETION_FADE_MS = 180
     CONFIRM_PADDING_PX = 4.0
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
@@ -53,11 +53,11 @@ class RoiSelectorOverlay(QWidget):
 
         self._completion_inset_anim = QPropertyAnimation(self, b"roiInset", self)
         self._completion_inset_anim.setDuration(self.COMPLETION_INSET_MS)
-        self._completion_inset_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._completion_inset_anim.setEasingCurve(QEasingCurve.InOutCubic)
 
         self._completion_fade_anim = QPropertyAnimation(self, b"overlayOpacity", self)
         self._completion_fade_anim.setDuration(self.COMPLETION_FADE_MS)
-        self._completion_fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._completion_fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
 
         self._confirm_animation.finished.connect(self._on_confirmation_complete)
         self._completion_inset_anim.finished.connect(self._on_completion_inset_finished)
@@ -196,6 +196,8 @@ class RoiSelectorOverlay(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
+        content_alpha = max(0.0, min(1.0, self._overlay_opacity))
+
         dim = QColor(self._overlay_color)
         overlay_alpha = int(round(255 * self._theme.overlay_opacity * self._overlay_opacity * self._theme.opacity_idle))
         dim.setAlpha(max(0, min(255, overlay_alpha)))
@@ -214,38 +216,46 @@ class RoiSelectorOverlay(QWidget):
             inner_pen.setDashPattern([6.0, 5.0])
             inner_pen.setCapStyle(Qt.RoundCap)
             inner_pen.setJoinStyle(Qt.RoundJoin)
+            inner_pen_color = QColor(self._primary_light_color)
+            inner_pen_color.setAlpha(int(96 * content_alpha))
+            inner_pen.setColor(inner_pen_color)
             painter.setPen(inner_pen)
 
             inner_fill = QColor(self._primary_light_color)
-            inner_fill.setAlpha(18)
+            inner_fill.setAlpha(int(12 * content_alpha))
             painter.setBrush(inner_fill)
             painter.drawRect(draw_rect)
 
             confirm_color = self._interpolate_color(self._primary_light_color, QColor(255, 255, 255), self._confirm_progress)
-            confirm_color.setAlpha(int(180 + (60 * self._confirm_progress)))
+            confirm_color.setAlpha(int((180 + (60 * self._confirm_progress)) * content_alpha))
             glow_color = QColor(confirm_color)
             glow_color.setAlpha(min(255, glow_color.alpha() // 5 + 34))
             glow_pen = QPen(glow_color, 3.0)
+            glow_pen.setStyle(Qt.SolidLine)
             glow_pen.setCapStyle(Qt.RoundCap)
             glow_pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(glow_pen)
-            self._draw_progressive_dashed_rect(painter, draw_rect, self._confirm_progress, glow_pen)
+            self._draw_progressive_solid_rect(painter, draw_rect, self._confirm_progress, glow_pen)
 
             confirm_pen = QPen(confirm_color, 1.4)
+            confirm_pen.setStyle(Qt.SolidLine)
             confirm_pen.setCapStyle(Qt.RoundCap)
             confirm_pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(confirm_pen)
-            self._draw_progressive_dashed_rect(painter, draw_rect, self._confirm_progress, confirm_pen)
+            self._draw_progressive_solid_rect(painter, draw_rect, self._confirm_progress, confirm_pen)
         else:
             pen = QPen(self._primary_light_color, 2.0)
             pen.setStyle(Qt.CustomDashLine)
             pen.setDashPattern([6.0, 6.0])
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
+            pen_color = QColor(self._primary_light_color)
+            pen_color.setAlpha(int(86 * content_alpha))
+            pen.setColor(pen_color)
             painter.setPen(pen)
 
             fill = QColor(self._primary_light_color)
-            fill.setAlpha(20)
+            fill.setAlpha(int(8 * content_alpha))
             painter.setBrush(fill)
             painter.drawRect(draw_rect)
 
@@ -293,14 +303,15 @@ class RoiSelectorOverlay(QWidget):
         self._completion_fade_anim.stop()
         self._completion_inset_anim.setStartValue(0.0)
         self._completion_inset_anim.setEndValue(2.0)
+        self._completion_fade_anim.setStartValue(self._overlay_opacity)
+        self._completion_fade_anim.setEndValue(0.0)
         self._completion_inset_anim.start()
+        self._completion_fade_anim.start()
 
     def _on_completion_inset_finished(self):
         if not self._is_valid_rect(self._locked_rect):
             return
-        self._completion_fade_anim.setStartValue(self._overlay_opacity)
-        self._completion_fade_anim.setEndValue(0.0)
-        self._completion_fade_anim.start()
+        self.update()
 
     def _finish_confirmed_selection(self):
         if self._is_valid_rect(self._locked_rect):
@@ -415,6 +426,20 @@ class RoiSelectorOverlay(QWidget):
 
             distance_cursor += side_length
 
+    def _draw_progressive_solid_rect(self, painter: QPainter, rect: QRect, progress: float, pen: QPen):
+        progress = max(0.0, min(1.0, float(progress)))
+        if progress <= 0.0:
+            return
+
+        perimeter_length = self._rect_perimeter_length(rect)
+        if perimeter_length <= 0.0:
+            return
+
+        reveal_length = perimeter_length * progress
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        self._draw_line_slice(painter, rect, 0.0, reveal_length)
+
     def _rect_perimeter_length(self, rect: QRect) -> float:
         return float(max(0, rect.width()) * 2 + max(0, rect.height()) * 2)
 
@@ -444,6 +469,44 @@ class RoiSelectorOverlay(QWidget):
             distance -= width
             return left, bottom - min(height, distance)
 
-        start_point = point_at(start_distance)
-        end_point = point_at(end_distance)
-        painter.drawLine(int(round(start_point[0])), int(round(start_point[1])), int(round(end_point[0])), int(round(end_point[1])))
+        width = right - left
+        height = bottom - top
+        edge_boundaries = [
+            width,
+            width + height,
+            (width * 2.0) + height,
+            perimeter,
+        ]
+
+        def edge_index_at(distance: float) -> int:
+            if distance < edge_boundaries[0]:
+                return 0
+            if distance < edge_boundaries[1]:
+                return 1
+            if distance < edge_boundaries[2]:
+                return 2
+            return 3
+
+        start_distance = max(0.0, min(perimeter, float(start_distance)))
+        end_distance = max(0.0, min(perimeter, float(end_distance)))
+        if end_distance <= start_distance:
+            return
+
+        cursor = start_distance
+        while cursor < end_distance:
+            edge_index = edge_index_at(cursor)
+            edge_limit = edge_boundaries[edge_index]
+            segment_end = min(end_distance, edge_limit)
+            start_point = point_at(cursor)
+            end_point = point_at(segment_end)
+            painter.drawLine(
+                int(round(start_point[0])),
+                int(round(start_point[1])),
+                int(round(end_point[0])),
+                int(round(end_point[1])),
+            )
+
+            # Guard against potential no-progress loops due to float rounding.
+            if segment_end <= cursor:
+                break
+            cursor = segment_end

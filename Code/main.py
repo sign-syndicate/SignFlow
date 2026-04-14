@@ -23,24 +23,15 @@ def main():
     orb = FloatingOrb(theme, debug=config.debug)
     selector = {"widget": None}
 
-    def _restore_orb():
-        orb.animateDisplayOpacity(1.0, 180)
-        if orb.isVisible():
-            return
-        orb.show()
-        orb.raise_()
-
     def _on_selection_cancelled():
         if config.debug:
             print("selection cancelled")
         selector["widget"] = None
-        _restore_orb()
 
     def _on_roi_confirmed(x: int, y: int, w: int, h: int):
         if config.debug:
             print(f"stored roi: {x}, {y}, {w}, {h}")
         selector["widget"] = None
-        _restore_orb()
 
     def _open_selector_overlay():
         active_selector = selector["widget"]
@@ -49,12 +40,11 @@ def main():
 
         orb.show()
         orb.raise_()
-        orb.animateDisplayOpacity(orb.HIDDEN_OPACITY, 180)
+        orb.enterHiddenDockMode()
         overlay = RoiSelectorOverlay(theme, debug=config.debug)
         overlay.roi_confirmed.connect(_on_roi_confirmed)
         overlay.selection_cancelled.connect(_on_selection_cancelled)
         overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
-        overlay.destroyed.connect(lambda *_: _restore_orb())
         selector["widget"] = overlay
         overlay.start()
 

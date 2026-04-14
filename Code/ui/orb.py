@@ -121,6 +121,12 @@ class FloatingOrb(QWidget):
 
     def animateDisplayOpacity(self, target_opacity: float, duration: int | None = None):
         self._animate_display_opacity(target_opacity, duration)
+
+    def enterHiddenDockMode(self):
+        self._cancel_idle_timer()
+        self._dock_hidden = True
+        self._animate_dock_visibility(False)
+
     displayOpacity = pyqtProperty(float, fget=getDisplayOpacity, fset=setDisplayOpacity)
 
     def showEvent(self, event):
