@@ -50,6 +50,8 @@ def main():
     orb.activated.connect(_open_selector_overlay)
     orb.show()
 
+    QTimer.singleShot(120, overlay.prime)
+
     app._signflow_orb = orb
     app._signflow_tray = tray
     app._signflow_selector = selector

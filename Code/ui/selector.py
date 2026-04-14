@@ -6,6 +6,7 @@ from PyQt5.QtCore import (
     QPropertyAnimation,
     QRect,
     Qt,
+    QTimer,
     pyqtProperty,
     pyqtSignal,
 )
@@ -25,6 +26,7 @@ class RoiSelectorOverlay(QWidget):
     COMPLETION_FADE_MS = 180
     CONFIRM_PADDING_PX = 4.0
     INSTRUCTION_TEXT = "Select a region"
+    PRIME_HIDE_DELAY_MS = 48
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
@@ -39,6 +41,8 @@ class RoiSelectorOverlay(QWidget):
         self._inset = 0.0
         self._overlay_opacity = 0.0
         self._confirm_progress = 0.0
+        self._is_exiting = False
+        self._emit_cancel_on_finish = False
 
         self._primary_color = QColor(self._theme.primary_color)
         self._primary_light_color = QColor(resolve_primary_light_color(self._theme))
@@ -110,6 +114,9 @@ class RoiSelectorOverlay(QWidget):
 
     def start(self):
         self._set_fullscreen_geometry()
+        self._clear_roi()
+        self._is_exiting = False
+        self._emit_cancel_on_finish = False
         self._set_state("idle")
         self._fade_in_anim.stop()
         self.overlayOpacity = 0.0
@@ -122,6 +129,21 @@ class RoiSelectorOverlay(QWidget):
         self.grabKeyboard()
         self.setFocus(Qt.ActiveWindowFocusReason)
         self._fade_in_anim.start()
+
+    def prime(self):
+        self._set_fullscreen_geometry()
+        self._clear_roi()
+        self._is_exiting = False
+        self._emit_cancel_on_finish = False
+        self._set_state("idle")
+        self._fade_in_anim.stop()
+        self._completion_inset_anim.stop()
+        self._completion_fade_anim.stop()
+        self.overlayOpacity = 0.02
+        self.roiInset = 0.0
+        self.show()
+        self.update()
+        QTimer.singleShot(self.PRIME_HIDE_DELAY_MS, self.hide)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -153,6 +175,11 @@ class RoiSelectorOverlay(QWidget):
             event.ignore()
             return
 
+        if self._state == "confirming_roi":
+            self._cancel_selection()
+            event.accept()
+            return
+
         self._begin_selection(event.pos())
         event.accept()
 
@@ -181,8 +208,7 @@ class RoiSelectorOverlay(QWidget):
         if self._is_valid_rect(self._roi_rect):
             self._enter_confirmation()
         else:
-            self._clear_roi()
-            self._set_state("idle")
+            self._cancel_selection()
 
         self.update()
         event.accept()
@@ -318,19 +344,7 @@ class RoiSelectorOverlay(QWidget):
     def _on_confirmation_complete(self):
         if self._state != "confirming_roi" or not self._is_valid_rect(self._roi_rect):
             return
-        self._locked_rect = QRect(self._roi_rect)
-        print(
-            f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
-            f"{self._locked_rect.width()}, {self._locked_rect.height()}"
-        )
-        self._completion_inset_anim.stop()
-        self._completion_fade_anim.stop()
-        self._completion_inset_anim.setStartValue(0.0)
-        self._completion_inset_anim.setEndValue(2.0)
-        self._completion_fade_anim.setStartValue(self._overlay_opacity)
-        self._completion_fade_anim.setEndValue(0.0)
-        self._completion_inset_anim.start()
-        self._completion_fade_anim.start()
+        self._start_exit_animation(confirm=True)
 
     def _on_completion_inset_finished(self):
         if not self._is_valid_rect(self._locked_rect):
@@ -338,6 +352,14 @@ class RoiSelectorOverlay(QWidget):
         self.update()
 
     def _finish_confirmed_selection(self):
+        if self._emit_cancel_on_finish:
+            self._emit_cancel_on_finish = False
+            self._clear_roi()
+            self._set_state("idle")
+            self.selection_cancelled.emit()
+            self.close()
+            return
+
         if self._is_valid_rect(self._locked_rect):
             self.roi_confirmed.emit(
                 self._locked_rect.x(),
@@ -345,17 +367,40 @@ class RoiSelectorOverlay(QWidget):
                 self._locked_rect.width(),
                 self._locked_rect.height(),
             )
+        self._clear_roi()
+        self._set_state("idle")
         self.close()
 
     def _cancel_selection(self):
+        self._start_exit_animation(confirm=False)
+
+    def _start_exit_animation(self, confirm: bool):
+        if self._is_exiting:
+            return
+
+        self._is_exiting = True
         self._confirm_animation.stop()
+        self._fade_in_anim.stop()
         self._completion_inset_anim.stop()
         self._completion_fade_anim.stop()
-        self._fade_in_anim.stop()
-        self._clear_roi()
-        self._set_state("idle")
-        self.selection_cancelled.emit()
-        self.close()
+
+        if confirm and self._is_valid_rect(self._roi_rect):
+            self._emit_cancel_on_finish = False
+            self._locked_rect = QRect(self._roi_rect)
+            print(
+                f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
+                f"{self._locked_rect.width()}, {self._locked_rect.height()}"
+            )
+        else:
+            self._emit_cancel_on_finish = True
+            self._locked_rect = QRect()
+
+        self._completion_inset_anim.setStartValue(0.0)
+        self._completion_inset_anim.setEndValue(2.0)
+        self._completion_fade_anim.setStartValue(self._overlay_opacity)
+        self._completion_fade_anim.setEndValue(0.0)
+        self._completion_inset_anim.start()
+        self._completion_fade_anim.start()
 
     def _clear_roi(self):
         self._origin = None
@@ -364,6 +409,7 @@ class RoiSelectorOverlay(QWidget):
         self._locked_rect = QRect()
         self.roiInset = 0.0
         self.confirmProgress = 0.0
+        self._is_exiting = False
 
     def _set_fullscreen_geometry(self):
         screens = QGuiApplication.screens()
