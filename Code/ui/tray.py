@@ -1,61 +1,65 @@
 from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QColor, QConicalGradient, QIcon, QPainter, QPen, QPixmap, QRadialGradient
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PyQt5.QtWidgets import QAction, QMenu, QSystemTrayIcon
 
 from ..core.theme import Theme
 
 
 def build_tray_icon(theme: Theme) -> QIcon:
-    pixmap = QPixmap(64, 64)
+    pixmap = QPixmap(96, 96)
     pixmap.fill(Qt.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    center = pixmap.rect().center()
+    center = QPointF(48.0, 48.0)
 
     glow_color = QColor(theme.glow_color)
-    glow_color.setAlphaF(0.5 if theme.name == "APPLE" else 0.62)
-    glow = QRadialGradient(center, 24)
+    glow_color.setAlphaF(0.40 if theme.name == "APPLE" else 0.54)
+    glow = QRadialGradient(center, 30)
     glow.setColorAt(0.0, glow_color)
-    glow.setColorAt(0.55, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 46))
+    glow.setColorAt(0.55, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 40))
     glow.setColorAt(1.0, QColor(0, 0, 0, 0))
     painter.setPen(Qt.NoPen)
     painter.setBrush(glow)
-    painter.drawEllipse(center, 22, 22)
+    painter.drawEllipse(center, 25, 25)
 
     if theme.name == "APPLE":
-        shell = QRadialGradient(center - QPointF(2.0, 3.0), 17)
-        shell.setColorAt(0.0, QColor(255, 255, 255, 245))
-        shell.setColorAt(0.62, QColor(230, 230, 228, 230))
-        shell.setColorAt(1.0, QColor(192, 192, 190, 255))
+        shell = QRadialGradient(center - QPointF(3.0, 4.0), 22)
+        shell.setColorAt(0.0, QColor(255, 255, 255, 248))
+        shell.setColorAt(0.56, QColor(238, 238, 236, 240))
+        shell.setColorAt(1.0, QColor(198, 198, 196, 255))
     else:
-        shell = QRadialGradient(center - QPointF(2.0, 3.0), 17)
-        shell.setColorAt(0.0, QColor(25, 32, 38, 255))
-        shell.setColorAt(0.62, QColor(13, 18, 22, 245))
-        shell.setColorAt(1.0, QColor(7, 10, 13, 255))
+        shell = QRadialGradient(center - QPointF(3.0, 4.0), 22)
+        shell.setColorAt(0.0, QColor(28, 35, 41, 255))
+        shell.setColorAt(0.62, QColor(12, 17, 22, 250))
+        shell.setColorAt(1.0, QColor(6, 9, 12, 255))
     painter.setBrush(shell)
-    painter.drawEllipse(center, 16, 16)
+    painter.drawEllipse(center, 20, 20)
 
-    accent_ring = QConicalGradient(center, 18)
-    accent_ring.setColorAt(0.00, QColor(theme.hover_color if theme.name != "APPLE" else "#D4D4D4"))
-    accent_ring.setColorAt(0.18, QColor(theme.glow_color))
-    accent_ring.setColorAt(0.38, QColor(255, 255, 255, 0))
-    accent_ring.setColorAt(0.70, QColor(theme.glow_color))
-    accent_ring.setColorAt(1.00, QColor(theme.hover_color if theme.name != "APPLE" else "#F4F4F4"))
-    ring_pen = QPen(accent_ring, 1.7)
+    ring_color = QColor("#A7A7A7") if theme.name == "APPLE" else QColor(theme.glow_color)
+    ring_color.setAlphaF(0.95 if theme.name == "APPLE" else 0.85)
+    ring_pen = QPen(ring_color, 2.1)
     ring_pen.setCapStyle(Qt.RoundCap)
     ring_pen.setJoinStyle(Qt.RoundJoin)
     painter.setPen(ring_pen)
     painter.setBrush(Qt.NoBrush)
-    painter.drawEllipse(center, 16, 16)
+    painter.drawEllipse(center, 20, 20)
+
+    accent = QColor(theme.hover_color if theme.name != "APPLE" else "#F6F6F6")
+    accent.setAlphaF(0.9 if theme.name != "APPLE" else 0.75)
+    accent_pen = QPen(accent, 1.1)
+    accent_pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(accent_pen)
+    painter.drawArc(28, 28, 40, 40, 30 * 16, 70 * 16)
+    painter.drawArc(28, 28, 40, 40, 210 * 16, 70 * 16)
 
     if theme.name == "APPLE":
-        dot = QRadialGradient(center - QPointF(5.0, 5.0), 6)
-        dot.setColorAt(0.0, QColor(255, 255, 255, 180))
+        dot = QRadialGradient(center - QPointF(6.0, 6.0), 8)
+        dot.setColorAt(0.0, QColor(255, 255, 255, 170))
         dot.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(dot)
-        painter.drawEllipse(center - QPointF(6.0, 6.0), 12, 12)
+        painter.drawEllipse(center - QPointF(7.0, 7.0), 14, 14)
 
     painter.end()
 

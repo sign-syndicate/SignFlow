@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 APP_NAME = "SignFlow"
-CURRENT_THEME = "DARK"
+CURRENT_THEME = "APPLE"
 DEBUG = False
 
 

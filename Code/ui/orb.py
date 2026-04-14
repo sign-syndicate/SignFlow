@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PyQt5.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty
-from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient, QConicalGradient
+from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient
 from PyQt5.QtWidgets import QApplication, QWidget
 
 from ..core.theme import Theme
@@ -29,6 +29,7 @@ class FloatingOrb(QWidget):
         self._snap_animation = None
         self._border_phase = 0.0
         self._cursor_proximity = 0.0
+        self._click_flash = 0.0
 
         self.setFixedSize(self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
         self.setWindowFlags(
@@ -53,6 +54,9 @@ class FloatingOrb(QWidget):
         self._hover_animation = QPropertyAnimation(self, b"hoverProgress", self)
         self._hover_animation.setDuration(120)
         self._hover_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._click_flash_animation = QPropertyAnimation(self, b"clickFlash", self)
+        self._click_flash_animation.setEasingCurve(QEasingCurve.OutCubic)
 
         self._magnet_timer = QTimer(self)
         self._magnet_timer.setInterval(16)
@@ -81,6 +85,15 @@ class FloatingOrb(QWidget):
         self.update()
 
     hoverProgress = pyqtProperty(float, fget=getHoverProgress, fset=setHoverProgress)
+
+    def getClickFlash(self) -> float:
+        return self._click_flash
+
+    def setClickFlash(self, value: float):
+        self._click_flash = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    clickFlash = pyqtProperty(float, fget=getClickFlash, fset=setClickFlash)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -134,6 +147,18 @@ class FloatingOrb(QWidget):
         fill_gradient.setColorAt(0.5, base)
         fill_gradient.setColorAt(1.0, base_darker)
 
+        if self._click_flash > 0.0:
+            flash = QColor(self._theme.hover_color if self._theme.name != "APPLE" else "#FFFFFF")
+            flash_alpha = 0.22 if self._theme.name == "APPLE" else 0.30
+            flash.setAlphaF(flash_alpha * self._click_flash)
+            flash_gradient = QRadialGradient(center, radius * 1.08)
+            flash_gradient.setColorAt(0.0, flash)
+            flash_gradient.setColorAt(0.45, QColor(flash.red(), flash.green(), flash.blue(), 0))
+            flash_gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(flash_gradient)
+            painter.drawEllipse(orb_rect.adjusted(-2.0, -2.0, 2.0, 2.0))
+
         painter.setBrush(fill_gradient)
         painter.drawEllipse(orb_rect)
 
@@ -145,36 +170,7 @@ class FloatingOrb(QWidget):
         painter.setBrush(sheen)
         painter.drawEllipse(orb_rect.adjusted(radius * 0.08, radius * 0.08, -radius * 0.12, -radius * 0.12))
 
-        border_rect = orb_rect.adjusted(-4.2, -4.2, 4.2, 4.2)
-        painter.setPen(Qt.NoPen)
-
-        if self._theme.name == "APPLE":
-            border_gradient = QConicalGradient(center, self._border_phase)
-            border_gradient.setColorAt(0.00, QColor(248, 248, 248, 255))
-            border_gradient.setColorAt(0.14, QColor(216, 216, 216, 228))
-            border_gradient.setColorAt(0.30, QColor(178, 178, 178, 0))
-            border_gradient.setColorAt(0.52, QColor(255, 255, 255, 42))
-            border_gradient.setColorAt(0.72, QColor(196, 196, 196, 220))
-            border_gradient.setColorAt(1.00, QColor(248, 248, 248, 255))
-            border_brush = QBrush(border_gradient)
-            border_width = 2.3
-        else:
-            border_gradient = QConicalGradient(center, self._border_phase)
-            border_gradient.setColorAt(0.00, QColor(self._theme.hover_color))
-            border_gradient.setColorAt(0.18, QColor(self._theme.glow_color))
-            border_gradient.setColorAt(0.34, QColor(0, 0, 0, 0))
-            border_gradient.setColorAt(0.60, QColor(255, 255, 255, 18))
-            border_gradient.setColorAt(0.82, QColor(self._theme.glow_color))
-            border_gradient.setColorAt(1.00, QColor(self._theme.hover_color))
-            border_brush = QBrush(border_gradient)
-            border_width = 2.0
-
-        border_pen = QPen(border_brush, border_width)
-        border_pen.setCapStyle(Qt.RoundCap)
-        border_pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(border_pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(border_rect)
+        self._draw_border_segments(painter, orb_rect, center)
 
         inner_rim_alpha = 50 if self._theme.name == "APPLE" else 24
         inner_rim = QPen(QColor(255, 255, 255, inner_rim_alpha))
@@ -201,7 +197,7 @@ class FloatingOrb(QWidget):
         self._press_window_pos = self.pos()
         self._stop_snap_animation()
         self._magnet_offset = QPointF(0.0, 0.0)
-        self._set_hover_state(True)
+        self._trigger_click_flash()
         event.accept()
 
     def mouseMoveEvent(self, event):
@@ -228,7 +224,6 @@ class FloatingOrb(QWidget):
         dragged = self._drag_threshold_exceeded
         self._dragging = False
         self._drag_threshold_exceeded = False
-        self._set_hover_state(self.underMouse())
 
         if not dragged:
             print("orb clicked")
@@ -246,6 +241,16 @@ class FloatingOrb(QWidget):
     def _set_hover_state(self, active: bool):
         self._hover_animation.stop()
         self.hoverProgress = 1.0 if active else 0.0
+
+    def _trigger_click_flash(self):
+        self._click_flash_animation.stop()
+        self._click_flash_animation.setDuration(0)
+        self.clickFlash = 0.0
+        self._click_flash_animation.setDuration(110)
+        self._click_flash_animation.setStartValue(0.0)
+        self._click_flash_animation.setKeyValueAt(0.45, 1.0)
+        self._click_flash_animation.setEndValue(0.0)
+        self._click_flash_animation.start()
 
     def _position_initially(self):
         if self._positioned:
@@ -333,6 +338,67 @@ class FloatingOrb(QWidget):
             self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.18
 
         self.update()
+
+    def _draw_border_segments(self, painter: QPainter, orb_rect: QRectF, center: QPointF):
+        border_rect = orb_rect.adjusted(-4.2, -4.2, 4.2, 4.2)
+        ring_width = 2.3 if self._theme.name == "APPLE" else 2.05
+        segment_span = 24.0
+        slots = 4
+        phase = self._border_phase % 360.0
+
+        if self._theme.name == "APPLE":
+            base_colors = [
+                QColor(232, 232, 232, 232),
+                QColor(196, 196, 196, 186),
+                QColor(166, 166, 166, 220),
+                QColor(202, 202, 202, 180),
+            ]
+            accent_colors = [
+                QColor(255, 255, 255, 242),
+                QColor(212, 212, 212, 228),
+            ]
+        else:
+            base_colors = [
+                QColor(self._theme.glow_color),
+                QColor(self._theme.hover_color),
+                QColor(255, 255, 255, 52),
+                QColor(self._theme.glow_color),
+            ]
+            accent_colors = [
+                QColor(self._theme.hover_color),
+                QColor(self._theme.glow_color),
+            ]
+
+        painter.setBrush(Qt.NoBrush)
+        for index in range(slots):
+            angle = (phase + index * (360.0 / slots)) % 360.0
+            distance_to_primary = min(abs(angle - phase), 360.0 - abs(angle - phase))
+            distance_to_secondary = min(abs(angle - ((phase + 180.0) % 360.0)), 360.0 - abs(angle - ((phase + 180.0) % 360.0)))
+            primary_mix = max(0.0, 1.0 - (distance_to_primary / 54.0))
+            secondary_mix = max(0.0, 1.0 - (distance_to_secondary / 54.0))
+            brightness = min(1.0, 0.42 + (primary_mix * 0.58) + (secondary_mix * 0.22))
+
+            if self._theme.name == "APPLE":
+                if primary_mix > 0.65:
+                    color = accent_colors[0]
+                elif secondary_mix > 0.65:
+                    color = accent_colors[1]
+                else:
+                    color = base_colors[index % len(base_colors)]
+            else:
+                if primary_mix > 0.65:
+                    color = accent_colors[0]
+                elif secondary_mix > 0.65:
+                    color = accent_colors[1]
+                else:
+                    color = base_colors[index % len(base_colors)]
+
+            color = QColor(color)
+            color.setAlphaF(max(0.18, min(1.0, color.alphaF() * brightness)))
+            pen = QPen(color, ring_width)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(border_rect, int((90.0 - (angle + segment_span * 0.5)) * 16), int(segment_span * 16))
 
     def _clamp_to_screen(self, position: QPoint, screen) -> QPoint:
         geometry = screen.availableGeometry()
