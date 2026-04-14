@@ -1,6 +1,6 @@
 # SignFlow
 
-Minimal desktop baseline built with PyQt5.
+Minimal desktop shell built with PyQt5.
 
 ## Quick Start
 
@@ -11,22 +11,24 @@ python main.py
 
 ## What It Does
 
-The current project is a clean restart baseline.
+SignFlow now starts as a static-theme tray app with one floating orb:
 
-It runs as a system tray application with a minimal menu:
-
-- Start (no-op, prints to console)
-- Exit (quits the app)
-
-No floating windows, overlays, or animation systems are included in this reset.
+- System tray icon with an Exit action only
+- Floating orb anchored near the right edge
+- Subtle breathing, hover, magnetic, and snap motion
+- Static theme selection at startup only
 
 ## Architecture
 
 ```
 Code/
 ├── core/
-│   ├── config.py         # Minimal runtime config
-│   └── state_manager.py  # Minimal state holder (idle baseline)
+│   ├── config.py         # App constants and static theme choice
+│   ├── theme.py          # Theme definitions and resolver
+│   └── state_manager.py  # Minimal state holder
+├── ui/
+│   ├── orb.py            # Floating orb widget
+│   └── tray.py           # System tray controller
 └── main.py              # PyQt5 entry point
 
 Documents/
@@ -36,9 +38,10 @@ Documents/
 ## Current Behavior
 
 1. Launches QApplication.
-2. Creates a QSystemTrayIcon.
-3. Provides Start and Exit menu actions.
-4. Keeps app alive in the tray until Exit.
+2. Resolves the configured theme once at startup.
+3. Creates a QSystemTrayIcon with only Exit in the menu.
+4. Shows a draggable floating orb with edge snapping and idle motion.
+5. Keeps the app alive in the tray until Exit.
 
 ## License
 

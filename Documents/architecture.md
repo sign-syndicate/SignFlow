@@ -1,22 +1,25 @@
 # SignFlow Architecture
 
-This repository is currently in a hard-reset baseline state.
+This build centers on a single floating assistive orb plus a tray process shell.
 
 ## Current Build
 
-The runtime is intentionally minimal:
+The runtime is intentionally constrained:
 
-- `Code/main.py` starts a tray-only application.
-- `Code/core/config.py` contains minimal app configuration.
-- `Code/core/state_manager.py` contains minimal state handling.
+- `Code/main.py` starts the tray controller and orb.
+- `Code/core/config.py` holds the application name, debug flag, and startup theme choice.
+- `Code/core/theme.py` defines the static Apple and Hacker themes.
+- `Code/ui/orb.py` renders and animates the floating orb.
+- `Code/ui/tray.py` creates the tray icon and Exit action.
 
 ## State Model
 
 - Current state baseline: `idle`
 
-No UI transition graph is active in this reset.
+No higher-level workflow state machine is active.
 
 ## Notes
 
-- All previous UI modules under `Code/ui/` were removed as part of hard reset.
-- This baseline exists to support incremental rebuild from a stable tray runtime.
+- Theme selection is resolved once at startup.
+- The orb uses custom painting and lightweight animations only.
+- The tray menu intentionally exposes Exit and nothing else.

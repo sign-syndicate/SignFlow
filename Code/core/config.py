@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 
 
+APP_NAME = "SignFlow"
+CURRENT_THEME = "APPLE"
+DEBUG = False
+
+
 @dataclass(frozen=True)
 class AppConfig:
-    app_name: str = "SignFlow"
+    app_name: str = APP_NAME
+    current_theme: str = CURRENT_THEME
+    debug: bool = DEBUG
