@@ -25,6 +25,7 @@ class RoiSelectorOverlay(QWidget):
     COMPLETION_INSET_MS = 180
     COMPLETION_FADE_MS = 180
     CONFIRM_PADDING_PX = 4.0
+    INSTRUCTION_TEXT = "Select a region"
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
@@ -139,9 +140,8 @@ class RoiSelectorOverlay(QWidget):
         super().closeEvent(event)
 
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.KeyPress:
-            self._cancel_selection()
-            return True
+        if event.type() == QEvent.KeyPress and self.isVisible():
+            return self._handle_key_action(event.key())
         return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event):
@@ -189,7 +189,9 @@ class RoiSelectorOverlay(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
-        self._cancel_selection()
+        handled = self._handle_key_action(event.key())
+        if not handled:
+            self._cancel_selection()
         event.accept()
 
     def paintEvent(self, _event):
@@ -203,6 +205,8 @@ class RoiSelectorOverlay(QWidget):
         overlay_alpha = int(round(255 * self._theme.overlay_opacity * self._overlay_opacity * self._theme.opacity_idle))
         dim.setAlpha(max(0, min(255, overlay_alpha)))
         painter.fillRect(self.rect(), dim)
+
+        self._draw_top_instruction(painter, content_alpha)
 
         if not self._is_valid_rect(self._roi_rect):
             return
@@ -291,6 +295,26 @@ class RoiSelectorOverlay(QWidget):
         self._confirm_animation.setStartValue(0.0)
         self._confirm_animation.setEndValue(1.0)
         self._confirm_animation.start()
+
+    def _skip_confirmation_timer(self):
+        if not self._is_valid_rect(self._roi_rect):
+            return
+
+        self._confirm_animation.stop()
+        self.confirmProgress = 1.0
+        self._set_state("confirming_roi")
+        self._on_confirmation_complete()
+
+    def _handle_key_action(self, key: int) -> bool:
+        if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            if self._is_valid_rect(self._roi_rect):
+                self._skip_confirmation_timer()
+            else:
+                self._cancel_selection()
+            return True
+
+        self._cancel_selection()
+        return True
 
     def _on_confirmation_complete(self):
         if self._state != "confirming_roi" or not self._is_valid_rect(self._roi_rect):
@@ -443,6 +467,38 @@ class RoiSelectorOverlay(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         self._draw_line_slice(painter, rect, 0.0, reveal_length)
+
+    def _draw_top_instruction(self, painter: QPainter, content_alpha: float):
+        if content_alpha <= 0.01:
+            return
+
+        text_color = QColor(self._primary_light_color)
+        text_color.setAlpha(int(232 * content_alpha))
+
+        backdrop_color = QColor(self._overlay_color)
+        backdrop_color.setAlpha(int(168 * content_alpha))
+
+        border_color = QColor(self._primary_light_color)
+        border_color.setAlpha(int(88 * content_alpha))
+
+        metrics = painter.fontMetrics()
+        text_width = metrics.horizontalAdvance(self.INSTRUCTION_TEXT)
+        text_height = metrics.height()
+        padding_x = 14
+        padding_y = 8
+        box_width = text_width + (padding_x * 2)
+        box_height = text_height + (padding_y * 2)
+        box_x = int((self.width() - box_width) / 2)
+        box_y = 10
+
+        painter.setPen(QPen(border_color, 1.0))
+        painter.setBrush(backdrop_color)
+        painter.drawRoundedRect(box_x, box_y, box_width, box_height, 8.0, 8.0)
+
+        painter.setPen(text_color)
+        painter.setBrush(Qt.NoBrush)
+        text_y = box_y + padding_y + metrics.ascent()
+        painter.drawText(box_x + padding_x, text_y, self.INSTRUCTION_TEXT)
 
     def _rect_perimeter_length(self, rect: QRect) -> float:
         return float(max(0, rect.width()) * 2 + max(0, rect.height()) * 2)
