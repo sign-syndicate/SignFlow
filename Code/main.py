@@ -1,10 +1,12 @@
 import sys
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
 
 from .core.config import AppConfig
 from .core.theme import get_theme
 from .ui.orb import FloatingOrb
+from .ui.selector import RoiSelectorOverlay
 from .ui.tray import SystemTrayController
 
 
@@ -20,10 +22,39 @@ def main():
 
     tray = SystemTrayController(app, theme)
     orb = FloatingOrb(theme, debug=config.debug)
+    selector = {"widget": None}
+
+    def _on_selection_cancelled():
+        if config.debug:
+            print("selection cancelled")
+        selector["widget"] = None
+
+    def _on_roi_confirmed(x: int, y: int, w: int, h: int):
+        if config.debug:
+            print(f"stored roi: {x}, {y}, {w}, {h}")
+        selector["widget"] = None
+
+    overlay = RoiSelectorOverlay(theme, debug=config.debug)
+    overlay.roi_confirmed.connect(_on_roi_confirmed)
+    overlay.selection_cancelled.connect(_on_selection_cancelled)
+    overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
+    selector["widget"] = overlay
+
+    def _open_selector_overlay():
+        active_selector = selector["widget"]
+        if active_selector is not None and active_selector.isVisible():
+            return
+
+        QTimer.singleShot(0, overlay.start)
+
+    orb.activated.connect(_open_selector_overlay)
     orb.show()
+
+    QTimer.singleShot(120, overlay.prime)
 
     app._signflow_orb = orb
     app._signflow_tray = tray
+    app._signflow_selector = selector
 
     sys.exit(app.exec_())
 
