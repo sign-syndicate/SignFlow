@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from PyQt5.QtCore import (
     QEasingCurve,
+    QEvent,
     QPropertyAnimation,
     QRect,
-    QSequentialAnimationGroup,
     Qt,
-    QTimer,
     pyqtProperty,
     pyqtSignal,
 )
@@ -22,7 +21,9 @@ class RoiSelectorOverlay(QWidget):
 
     CONFIRMATION_MS = 3000
     FADE_IN_MS = 180
-    COMPLETION_MS = 150
+    COMPLETION_INSET_MS = 90
+    COMPLETION_FADE_MS = 170
+    CONFIRM_PADDING_PX = 4.0
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
@@ -34,46 +35,46 @@ class RoiSelectorOverlay(QWidget):
         self._current = None
         self._roi_rect = QRect()
         self._locked_rect = QRect()
-        self._confirm_elapsed_ms = 0
-        self._dash_offset = 0.0
         self._inset = 0.0
         self._overlay_opacity = 0.0
+        self._confirm_progress = 0.0
 
         self._primary_color = QColor(self._theme.primary_color)
         self._primary_light_color = QColor(resolve_primary_light_color(self._theme))
         self._overlay_color = QColor(self._theme.overlay_color)
 
-        self._confirm_timer = QTimer(self)
-        self._confirm_timer.setInterval(33)
-        self._confirm_timer.timeout.connect(self._on_confirm_tick)
+        self._confirm_animation = QPropertyAnimation(self, b"confirmProgress", self)
+        self._confirm_animation.setDuration(self.CONFIRMATION_MS)
+        self._confirm_animation.setEasingCurve(QEasingCurve.Linear)
 
         self._fade_in_anim = QPropertyAnimation(self, b"overlayOpacity", self)
         self._fade_in_anim.setDuration(self.FADE_IN_MS)
         self._fade_in_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._completion_inset_anim = QPropertyAnimation(self, b"roiInset", self)
-        self._completion_inset_anim.setDuration(120)
+        self._completion_inset_anim.setDuration(self.COMPLETION_INSET_MS)
         self._completion_inset_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._completion_fade_anim = QPropertyAnimation(self, b"overlayOpacity", self)
-        self._completion_fade_anim.setDuration(self.COMPLETION_MS)
+        self._completion_fade_anim.setDuration(self.COMPLETION_FADE_MS)
         self._completion_fade_anim.setEasingCurve(QEasingCurve.OutCubic)
 
-        self._completion_group = QSequentialAnimationGroup(self)
-        self._completion_group.addAnimation(self._completion_inset_anim)
-        self._completion_group.addAnimation(self._completion_fade_anim)
-        self._completion_group.finished.connect(self._finish_confirmed_selection)
+        self._confirm_animation.finished.connect(self._on_confirmation_complete)
+        self._completion_inset_anim.finished.connect(self._on_completion_inset_finished)
+        self._completion_fade_anim.finished.connect(self._finish_confirmed_selection)
 
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
             | Qt.Tool
-            | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.CrossCursor)
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     def getOverlayOpacity(self) -> float:
         return self._overlay_opacity
@@ -93,6 +94,15 @@ class RoiSelectorOverlay(QWidget):
 
     roiInset = pyqtProperty(float, fget=getRoiInset, fset=setRoiInset)
 
+    def getConfirmProgress(self) -> float:
+        return self._confirm_progress
+
+    def setConfirmProgress(self, value: float):
+        self._confirm_progress = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    confirmProgress = pyqtProperty(float, fget=getConfirmProgress, fset=setConfirmProgress)
+
     @property
     def state(self) -> str:
         return self._state
@@ -109,6 +119,7 @@ class RoiSelectorOverlay(QWidget):
         self.raise_()
         self.activateWindow()
         self.grabKeyboard()
+        self.setFocus(Qt.ActiveWindowFocusReason)
         self._fade_in_anim.start()
 
     def showEvent(self, event):
@@ -116,11 +127,21 @@ class RoiSelectorOverlay(QWidget):
         self._set_fullscreen_geometry()
 
     def closeEvent(self, event):
-        self._confirm_timer.stop()
-        self._completion_group.stop()
+        self._confirm_animation.stop()
+        self._completion_inset_anim.stop()
+        self._completion_fade_anim.stop()
         self._fade_in_anim.stop()
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         self.releaseKeyboard()
         super().closeEvent(event)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress:
+            self._cancel_selection()
+            return True
+        return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -167,11 +188,8 @@ class RoiSelectorOverlay(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self._cancel_selection()
-            event.accept()
-            return
-        super().keyPressEvent(event)
+        self._cancel_selection()
+        event.accept()
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -191,41 +209,43 @@ class RoiSelectorOverlay(QWidget):
             return
 
         if self._state == "confirming_roi":
-            progress = min(1.0, self._confirm_elapsed_ms / float(self.CONFIRMATION_MS))
-            border_color = self._interpolate_color(self._primary_light_color, self._primary_color, progress)
-            glow_alpha = int(34 + (40 * progress))
-            glow_color = QColor(border_color)
-            glow_color.setAlpha(max(0, min(255, glow_alpha)))
+            inner_pen = QPen(self._primary_light_color, 1.9)
+            inner_pen.setStyle(Qt.CustomDashLine)
+            inner_pen.setDashPattern([6.0, 5.0])
+            inner_pen.setCapStyle(Qt.RoundCap)
+            inner_pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(inner_pen)
 
-            glow_pen = QPen(glow_color, 3.6)
+            inner_fill = QColor(self._primary_light_color)
+            inner_fill.setAlpha(18)
+            painter.setBrush(inner_fill)
+            painter.drawRect(draw_rect)
+
+            confirm_color = self._interpolate_color(self._primary_light_color, QColor(255, 255, 255), self._confirm_progress)
+            confirm_color.setAlpha(int(180 + (60 * self._confirm_progress)))
+            glow_color = QColor(confirm_color)
+            glow_color.setAlpha(min(255, glow_color.alpha() // 5 + 34))
+            glow_pen = QPen(glow_color, 3.0)
+            glow_pen.setCapStyle(Qt.RoundCap)
             glow_pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(glow_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(draw_rect)
+            self._draw_progressive_dashed_rect(painter, draw_rect, self._confirm_progress, glow_pen)
 
-            pen = QPen(border_color, 2.4)
-            pen.setStyle(Qt.CustomDashLine)
-            pen.setDashPattern([8.0, 6.0])
-            pen.setDashOffset(self._dash_offset)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-
-            fill = QColor(border_color)
-            fill.setAlpha(16)
-            painter.setBrush(fill)
-            painter.drawRect(draw_rect)
+            confirm_pen = QPen(confirm_color, 1.4)
+            confirm_pen.setCapStyle(Qt.RoundCap)
+            confirm_pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(confirm_pen)
+            self._draw_progressive_dashed_rect(painter, draw_rect, self._confirm_progress, confirm_pen)
         else:
-            pen = QPen(self._primary_light_color, 1.6)
+            pen = QPen(self._primary_light_color, 2.0)
             pen.setStyle(Qt.CustomDashLine)
             pen.setDashPattern([6.0, 6.0])
-            pen.setDashOffset(self._dash_offset)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
 
             fill = QColor(self._primary_light_color)
-            fill.setAlpha(14)
+            fill.setAlpha(20)
             painter.setBrush(fill)
             painter.drawRect(draw_rect)
 
@@ -239,44 +259,48 @@ class RoiSelectorOverlay(QWidget):
             painter.drawText(text_x, text_y, coords)
 
     def _begin_selection(self, point):
-        self._confirm_timer.stop()
-        self._completion_group.stop()
+        self._confirm_animation.stop()
+        self._completion_inset_anim.stop()
+        self._completion_fade_anim.stop()
         self._fade_in_anim.stop()
         self.roiInset = 0.0
+        self.confirmProgress = 0.0
 
         self._origin = point
         self._current = point
         self._roi_rect = QRect(point, point)
-        self._confirm_elapsed_ms = 0
-        self._dash_offset = 0.0
 
         self._set_state("selecting")
         self.update()
 
     def _enter_confirmation(self):
-        self._confirm_elapsed_ms = 0
-        self._dash_offset = 0.0
+        self._confirm_animation.stop()
+        self.confirmProgress = 0.0
         self._set_state("confirming_roi")
-        self._confirm_timer.start()
+        self._confirm_animation.setStartValue(0.0)
+        self._confirm_animation.setEndValue(1.0)
+        self._confirm_animation.start()
 
-    def _on_confirm_tick(self):
-        self._confirm_elapsed_ms += self._confirm_timer.interval()
-        self._dash_offset += 0.8
+    def _on_confirmation_complete(self):
+        if self._state != "confirming_roi" or not self._is_valid_rect(self._roi_rect):
+            return
+        self._locked_rect = QRect(self._roi_rect)
+        print(
+            f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
+            f"{self._locked_rect.width()}, {self._locked_rect.height()}"
+        )
+        self._completion_inset_anim.stop()
+        self._completion_fade_anim.stop()
+        self._completion_inset_anim.setStartValue(0.0)
+        self._completion_inset_anim.setEndValue(2.0)
+        self._completion_inset_anim.start()
 
-        if self._confirm_elapsed_ms >= self.CONFIRMATION_MS:
-            self._confirm_timer.stop()
-            self._locked_rect = QRect(self._roi_rect)
-            print(
-                f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
-                f"{self._locked_rect.width()}, {self._locked_rect.height()}"
-            )
-            self._completion_inset_anim.setStartValue(0.0)
-            self._completion_inset_anim.setEndValue(2.0)
-            self._completion_fade_anim.setStartValue(self._overlay_opacity)
-            self._completion_fade_anim.setEndValue(0.0)
-            self._completion_group.start()
-
-        self.update()
+    def _on_completion_inset_finished(self):
+        if not self._is_valid_rect(self._locked_rect):
+            return
+        self._completion_fade_anim.setStartValue(self._overlay_opacity)
+        self._completion_fade_anim.setEndValue(0.0)
+        self._completion_fade_anim.start()
 
     def _finish_confirmed_selection(self):
         if self._is_valid_rect(self._locked_rect):
@@ -289,8 +313,9 @@ class RoiSelectorOverlay(QWidget):
         self.close()
 
     def _cancel_selection(self):
-        self._confirm_timer.stop()
-        self._completion_group.stop()
+        self._confirm_animation.stop()
+        self._completion_inset_anim.stop()
+        self._completion_fade_anim.stop()
         self._fade_in_anim.stop()
         self._clear_roi()
         self._set_state("idle")
@@ -302,9 +327,8 @@ class RoiSelectorOverlay(QWidget):
         self._current = None
         self._roi_rect = QRect()
         self._locked_rect = QRect()
-        self._confirm_elapsed_ms = 0
-        self._dash_offset = 0.0
         self.roiInset = 0.0
+        self.confirmProgress = 0.0
 
     def _set_fullscreen_geometry(self):
         screens = QGuiApplication.screens()
@@ -339,3 +363,87 @@ class RoiSelectorOverlay(QWidget):
     @staticmethod
     def _is_valid_rect(rect: QRect) -> bool:
         return rect.width() >= 4 and rect.height() >= 4
+
+    @staticmethod
+    def _rect_perimeter_points(rect: QRect):
+        left = float(rect.left())
+        top = float(rect.top())
+        right = float(rect.right())
+        bottom = float(rect.bottom())
+
+        if right <= left or bottom <= top:
+            return []
+
+        return [
+            (left, top, right, top),
+            (right, top, right, bottom),
+            (right, bottom, left, bottom),
+            (left, bottom, left, top),
+        ]
+
+    def _draw_progressive_dashed_rect(self, painter: QPainter, rect: QRect, progress: float, pen: QPen):
+        progress = max(0.0, min(1.0, float(progress)))
+        if progress <= 0.0:
+            return
+
+        segments = self._rect_perimeter_points(rect)
+        if not segments:
+            return
+
+        dash_len = 12.0
+        gap_len = 7.0
+        reveal_length = self._rect_perimeter_length(rect) * progress
+
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        distance_cursor = 0.0
+        for start_x, start_y, end_x, end_y in segments:
+            side_length = abs(end_x - start_x) + abs(end_y - start_y)
+            if side_length <= 0.0:
+                continue
+
+            segment_cursor = 0.0
+            while segment_cursor < side_length:
+                dash_start = max(0.0, distance_cursor + segment_cursor)
+                if dash_start >= reveal_length:
+                    return
+                dash_end = min(distance_cursor + segment_cursor + dash_len, distance_cursor + side_length, reveal_length)
+                if dash_end > dash_start:
+                    self._draw_line_slice(painter, rect, dash_start, dash_end)
+                segment_cursor += dash_len + gap_len
+
+            distance_cursor += side_length
+
+    def _rect_perimeter_length(self, rect: QRect) -> float:
+        return float(max(0, rect.width()) * 2 + max(0, rect.height()) * 2)
+
+    def _draw_line_slice(self, painter: QPainter, rect: QRect, start_distance: float, end_distance: float):
+        left = float(rect.left())
+        top = float(rect.top())
+        right = float(rect.right())
+        bottom = float(rect.bottom())
+
+        perimeter = self._rect_perimeter_length(rect)
+        if perimeter <= 0.0:
+            return
+
+        def point_at(distance: float):
+            distance = max(0.0, min(perimeter, float(distance)))
+            width = right - left
+            height = bottom - top
+
+            if distance <= width:
+                return left + distance, top
+            distance -= width
+            if distance <= height:
+                return right, top + distance
+            distance -= height
+            if distance <= width:
+                return right - distance, bottom
+            distance -= width
+            return left, bottom - min(height, distance)
+
+        start_point = point_at(start_distance)
+        end_point = point_at(end_distance)
+        painter.drawLine(int(round(start_point[0])), int(round(start_point[1])), int(round(end_point[0])), int(round(end_point[1])))

@@ -119,6 +119,8 @@ class FloatingOrb(QWidget):
         self._display_opacity = max(self.HIDDEN_OPACITY, min(1.0, float(value)))
         self.update()
 
+    def animateDisplayOpacity(self, target_opacity: float, duration: int | None = None):
+        self._animate_display_opacity(target_opacity, duration)
     displayOpacity = pyqtProperty(float, fget=getDisplayOpacity, fset=setDisplayOpacity)
 
     def showEvent(self, event):
@@ -415,10 +417,10 @@ class FloatingOrb(QWidget):
         self._animate_to_position(target, self.DOCK_ANIMATION_MS, QEasingCurve.OutCubic)
         self._animate_display_opacity(1.0 if visible else self.HIDDEN_OPACITY)
 
-    def _animate_display_opacity(self, target_opacity: float):
+    def _animate_display_opacity(self, target_opacity: float, duration: int | None = None):
         self._stop_opacity_animation()
         self._opacity_animation = QPropertyAnimation(self, b"displayOpacity", self)
-        self._opacity_animation.setDuration(self.DOCK_ANIMATION_MS)
+        self._opacity_animation.setDuration(self.DOCK_ANIMATION_MS if duration is None else int(duration))
         self._opacity_animation.setEasingCurve(QEasingCurve.OutCubic)
         self._opacity_animation.setStartValue(self._display_opacity)
         self._opacity_animation.setEndValue(float(target_opacity))

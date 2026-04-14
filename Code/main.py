@@ -24,6 +24,7 @@ def main():
     selector = {"widget": None}
 
     def _restore_orb():
+        orb.animateDisplayOpacity(1.0, 180)
         if orb.isVisible():
             return
         orb.show()
@@ -46,7 +47,9 @@ def main():
         if active_selector is not None and active_selector.isVisible():
             return
 
-        orb.hide()
+        orb.show()
+        orb.raise_()
+        orb.animateDisplayOpacity(orb.HIDDEN_OPACITY, 180)
         overlay = RoiSelectorOverlay(theme, debug=config.debug)
         overlay.roi_confirmed.connect(_on_roi_confirmed)
         overlay.selection_cancelled.connect(_on_selection_cancelled)
