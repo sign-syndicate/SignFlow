@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PyQt5.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty
-from PyQt5.QtGui import QColor, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient
+from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient, QConicalGradient
 from PyQt5.QtWidgets import QApplication, QWidget
 
 from ..core.theme import Theme
@@ -11,7 +11,7 @@ from ..core.theme import Theme
 
 class FloatingOrb(QWidget):
     BASE_DIAMETER = 56.0
-    WIDGET_DIAMETER = 60
+    WIDGET_DIAMETER = 116
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
@@ -27,6 +27,7 @@ class FloatingOrb(QWidget):
         self._drag_start_distance = QApplication.startDragDistance()
         self._positioned = False
         self._snap_animation = None
+        self._border_phase = 0.0
 
         self.setFixedSize(self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
         self.setWindowFlags(
@@ -102,7 +103,7 @@ class FloatingOrb(QWidget):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.fillRect(self.rect(), Qt.transparent)
 
-        center = QPointF(self.rect().center()) + self._magnet_offset
+        center = QPointF(66.0, self.rect().center().y()) + self._magnet_offset
         effective_scale = self._scale * (1.0 + 0.05 * self._hover_progress)
         diameter = self.BASE_DIAMETER * effective_scale
         radius = diameter / 2.0
@@ -124,30 +125,51 @@ class FloatingOrb(QWidget):
 
         fill_gradient = QRadialGradient(orb_rect.topLeft() + QPointF(radius * 0.28, radius * 0.24), radius * 1.2)
         highlight = QColor(self._theme.hover_color)
-        highlight.setAlphaF(0.95)
+        highlight.setAlphaF(0.95 if self._theme.name == "APPLE" else 0.52)
         base = QColor(self._theme.base_color)
-        base_darker = QColor(self._theme.base_color).darker(112)
+        base_darker = QColor(self._theme.base_color).darker(112 if self._theme.name == "APPLE" else 128)
         fill_gradient.setColorAt(0.0, highlight)
-        fill_gradient.setColorAt(0.52, base)
+        fill_gradient.setColorAt(0.5, base)
         fill_gradient.setColorAt(1.0, base_darker)
 
         painter.setBrush(fill_gradient)
         painter.drawEllipse(orb_rect)
 
         sheen = QLinearGradient(orb_rect.topLeft(), orb_rect.bottomRight())
-        sheen_color = QColor(255, 255, 255, 36 if self._theme.name == "APPLE" else 18)
+        sheen_color = QColor(255, 255, 255, 36 if self._theme.name == "APPLE" else 14)
         sheen.setColorAt(0.0, sheen_color)
         sheen.setColorAt(0.4, QColor(255, 255, 255, 0))
         sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.setBrush(sheen)
         painter.drawEllipse(orb_rect.adjusted(radius * 0.08, radius * 0.08, -radius * 0.12, -radius * 0.12))
 
-        rim_alpha = 42 if self._theme.name == "APPLE" else 70
-        rim_pen = QPen(QColor(255, 255, 255, rim_alpha))
-        rim_pen.setWidthF(1.0)
-        painter.setPen(rim_pen)
+        border_rect = orb_rect.adjusted(1.2, 1.2, -1.2, -1.2)
+        border_gradient = QConicalGradient(center, self._border_phase)
+        border_accent = QColor(self._theme.hover_color)
+        border_accent.setAlphaF(0.95 if self._theme.name == "APPLE" else 0.78)
+        border_glow = QColor(self._theme.glow_color)
+        border_glow.setAlphaF(0.72 if self._theme.name == "APPLE" else 0.88)
+        border_soft = QColor(255, 255, 255, 32 if self._theme.name == "APPLE" else 10)
+        border_gradient.setColorAt(0.00, border_accent)
+        border_gradient.setColorAt(0.16, border_glow)
+        border_gradient.setColorAt(0.36, QColor(0, 0, 0, 0))
+        border_gradient.setColorAt(0.64, border_soft)
+        border_gradient.setColorAt(0.84, border_glow)
+        border_gradient.setColorAt(1.00, border_accent)
+
+        border_pen = QPen(QBrush(border_gradient), 2.2)
+        border_pen.setCapStyle(Qt.RoundCap)
+        border_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(border_pen)
         painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(orb_rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        painter.drawEllipse(border_rect)
+
+        inner_rim_alpha = 48 if self._theme.name == "APPLE" else 26
+        inner_rim = QPen(QColor(255, 255, 255, inner_rim_alpha))
+        inner_rim.setWidthF(0.8)
+        painter.setPen(inner_rim)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(orb_rect.adjusted(4.0, 4.0, -4.0, -4.0))
 
         if self._debug:
             debug_pen = QPen(QColor(255, 84, 84, 200))
@@ -263,35 +285,37 @@ class FloatingOrb(QWidget):
             self._snap_animation = None
 
     def _update_magnetic_offset(self):
+        self._border_phase = (self._border_phase + 1.4) % 360.0
+
         if self._dragging:
             if self._magnet_offset != QPointF(0.0, 0.0):
                 self._magnet_offset = QPointF(0.0, 0.0)
-                self.update()
-            return
-
-        screen = self._screen_for_point(QCursor.pos())
-        if screen is None:
-            return
-
-        cursor = QCursor.pos()
-        center = self.mapToGlobal(self.rect().center())
-        delta = QPointF(cursor.x() - center.x(), cursor.y() - center.y())
-        distance = math.hypot(delta.x(), delta.y())
-        if distance <= 0.01 or distance > 80.0:
-            target = QPointF(0.0, 0.0)
         else:
-            strength = (80.0 - distance) / 80.0
-            scale = min(5.0, 5.0 * strength)
-            target = QPointF((delta.x() / distance) * scale, (delta.y() / distance) * scale)
+            screen = self._screen_for_point(QCursor.pos())
+            if screen is None:
+                self.update()
+                return
 
-        current = self._magnet_offset
-        next_offset = QPointF(
-            current.x() + (target.x() - current.x()) * 0.18,
-            current.y() + (target.y() - current.y()) * 0.18,
-        )
-        if (abs(next_offset.x() - current.x()) > 0.01) or (abs(next_offset.y() - current.y()) > 0.01):
-            self._magnet_offset = next_offset
-            self.update()
+            cursor = QCursor.pos()
+            center = self.mapToGlobal(QPoint(self.rect().width() - 50, self.rect().center().y()))
+            delta = QPointF(cursor.x() - center.x(), cursor.y() - center.y())
+            distance = math.hypot(delta.x(), delta.y())
+            if distance <= 0.01 or distance > 80.0:
+                target = QPointF(0.0, 0.0)
+            else:
+                strength = (80.0 - distance) / 80.0
+                scale = min(5.0, 5.0 * strength)
+                target = QPointF((delta.x() / distance) * scale, (delta.y() / distance) * scale)
+
+            current = self._magnet_offset
+            next_offset = QPointF(
+                current.x() + (target.x() - current.x()) * 0.18,
+                current.y() + (target.y() - current.y()) * 0.18,
+            )
+            if (abs(next_offset.x() - current.x()) > 0.01) or (abs(next_offset.y() - current.y()) > 0.01):
+                self._magnet_offset = next_offset
+
+        self.update()
 
     def _clamp_to_screen(self, position: QPoint, screen) -> QPoint:
         geometry = screen.availableGeometry()

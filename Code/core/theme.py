@@ -22,18 +22,23 @@ THEMES = {
         opacity_hover=0.97,
         shadow_strength=0.22,
     ),
-    "HACKER": Theme(
-        name="HACKER",
-        base_color="#11161A",
-        glow_color="#38F6C7",
-        hover_color="#B06CFF",
-        opacity_idle=0.88,
+    "DARK": Theme(
+        name="DARK",
+        base_color="#0E141A",
+        glow_color="#35F0C6",
+        hover_color="#8B6CFF",
+        opacity_idle=0.9,
         opacity_hover=1.0,
-        shadow_strength=0.48,
+        shadow_strength=0.42,
     ),
+}
+
+LEGACY_THEME_ALIASES = {
+    "HACKER": "DARK",
 }
 
 
 def get_theme(theme_name: str) -> Theme:
     normalized = str(theme_name or "APPLE").strip().upper()
+    normalized = LEGACY_THEME_ALIASES.get(normalized, normalized)
     return THEMES.get(normalized, THEMES["APPLE"])
