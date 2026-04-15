@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
+import math
+
+from PyQt5.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
-from PyQt5.QtWidgets import QGraphicsOpacityEffect, QLabel, QPushButton, QWidget
+from PyQt5.QtCore import QRectF
+from PyQt5.QtWidgets import QGraphicsOpacityEffect, QLabel, QWidget
 
 from ..core.constants import ORB_PRESENTATION_DEFAULTS, PANEL_DEFAULTS
 from ..core.theme import Theme
@@ -10,6 +13,9 @@ from ..core.theme import Theme
 
 class OrbPanelContent(QWidget):
     collapse_requested = pyqtSignal()
+    drag_started = pyqtSignal(QPoint)
+    drag_moved = pyqtSignal(QPoint)
+    drag_released = pyqtSignal(QPoint)
 
     def __init__(self, theme: Theme, parent=None):
         super().__init__(parent)
@@ -18,6 +24,8 @@ class OrbPanelContent(QWidget):
         self._morph = 0.0
         self._radius = 14.0
         self._padding = 14
+        self._dragging = False
+        self._anchor_orb_rect = None
 
         self._caption_label = QLabel(PANEL_DEFAULTS.caption_placeholder, self)
         self._caption_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
@@ -29,12 +37,6 @@ class OrbPanelContent(QWidget):
         self._caption_anim = QPropertyAnimation(self._caption_opacity, b"opacity", self)
         self._caption_anim.setDuration(PANEL_DEFAULTS.caption_update_ms)
         self._caption_anim.setEasingCurve(QEasingCurve.OutCubic)
-
-        self._collapse_button = QPushButton("X", self)
-        self._collapse_button.setFocusPolicy(Qt.NoFocus)
-        self._collapse_button.setCursor(Qt.PointingHandCursor)
-        self._collapse_button.setFixedSize(PANEL_DEFAULTS.collapse_button_size_px, PANEL_DEFAULTS.collapse_button_size_px)
-        self._collapse_button.clicked.connect(self.collapse_requested.emit)
 
         self._apply_theme()
 
@@ -57,8 +59,8 @@ class OrbPanelContent(QWidget):
         self._morph = max(0.0, min(1.0, float(morph)))
         visible = self._morph > 0.20
         self._caption_label.setVisible(visible)
-        self._collapse_button.setVisible(visible)
         self._apply_layout()
+        self.update()
 
     def set_caption(self, text: str):
         safe_text = str(text).strip() if text is not None else ""
@@ -77,6 +79,33 @@ class OrbPanelContent(QWidget):
         super().resizeEvent(event)
         self._apply_layout()
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self._is_on_anchor_orb(event.pos()):
+                self.collapse_requested.emit()
+                event.accept()
+                return
+            self._dragging = True
+            self.drag_started.emit(event.globalPos())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self.drag_moved.emit(event.globalPos())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging and event.button() == Qt.LeftButton:
+            self._dragging = False
+            self.drag_released.emit(event.globalPos())
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -84,11 +113,17 @@ class OrbPanelContent(QWidget):
         if self._theme.name == "APPLE":
             fill = QColor(255, 255, 255, 250)
             border = QColor(24, 24, 24, 120)
+            orb_fill = QColor(255, 255, 255, 252)
+            orb_border = QColor(24, 24, 24, 120)
         else:
             fill = QColor(self._theme.base_color)
             fill.setAlpha(236)
             border = QColor(self._theme.primary_color)
             border.setAlpha(96)
+            orb_fill = QColor(self._theme.base_color)
+            orb_fill.setAlpha(246)
+            orb_border = QColor(self._theme.primary_color)
+            orb_border.setAlpha(110)
 
         painter.setBrush(fill)
         pen = QPen(border, 1.0)
@@ -97,21 +132,25 @@ class OrbPanelContent(QWidget):
         painter.setPen(pen)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self._radius, self._radius)
 
+        orb_rect = self._compute_anchor_orb_rect()
+        self._anchor_orb_rect = orb_rect
+        shadow = QColor(0, 0, 0, PANEL_DEFAULTS.anchor_orb_shadow_alpha)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(shadow)
+        painter.drawEllipse(orb_rect.adjusted(1.0, 1.0, 3.0, 3.0))
+
+        orb_pen = QPen(orb_border, PANEL_DEFAULTS.anchor_orb_border_px)
+        orb_pen.setCapStyle(Qt.RoundCap)
+        orb_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(orb_pen)
+        painter.setBrush(orb_fill)
+        painter.drawEllipse(orb_rect)
+
     def _apply_theme(self):
         if self._theme.name == "APPLE":
             caption_color = "#101010"
-            btn_color = "rgba(20, 20, 20, 230)"
-            btn_bg = "rgba(255, 255, 255, 0)"
-            btn_bg_hover = "rgba(0, 0, 0, 8)"
-            btn_bg_pressed = "rgba(0, 0, 0, 12)"
-            btn_border = "rgba(0, 0, 0, 34)"
         else:
             caption_color = "#ECECEF"
-            btn_color = "rgba(236, 236, 236, 220)"
-            btn_bg = "rgba(255, 255, 255, 12)"
-            btn_bg_hover = "rgba(255, 255, 255, 18)"
-            btn_bg_pressed = "rgba(255, 255, 255, 24)"
-            btn_border = "rgba(255, 255, 255, 26)"
 
         self._caption_label.setStyleSheet(
             "color: " + caption_color + ";"
@@ -121,24 +160,6 @@ class OrbPanelContent(QWidget):
             "border: none;"
         )
 
-        self._collapse_button.setStyleSheet(
-            "QPushButton {"
-            "color: " + btn_color + ";"
-            "font-size: " + str(PANEL_DEFAULTS.collapse_button_font_px) + "px;"
-            "font-weight: " + str(PANEL_DEFAULTS.collapse_button_weight) + ";"
-            "background: " + btn_bg + ";"
-            "border: 1px solid " + btn_border + ";"
-            "border-radius: 12px;"
-            "padding: 0px;"
-            "}"
-            "QPushButton:hover {"
-            "background: " + btn_bg_hover + ";"
-            "}"
-            "QPushButton:pressed {"
-            "background: " + btn_bg_pressed + ";"
-            "}"
-        )
-
     def _apply_layout(self):
         panel_w = self.width()
         panel_h = self.height()
@@ -146,19 +167,38 @@ class OrbPanelContent(QWidget):
             return
 
         padding = max(0, self._padding)
-        button_size = self._collapse_button.width()
-        button_y = max(0, (panel_h - button_size) // 2)
+        orb_diameter = PANEL_DEFAULTS.anchor_orb_diameter_px
+        orb_radius = orb_diameter * 0.5
 
         if self._edge == ORB_PRESENTATION_DEFAULTS.edge_right:
-            button_x = max(0, panel_w - padding - button_size)
+            orb_center_x = panel_w - PANEL_DEFAULTS.edge_overhang_px
             caption_left = max(0, padding)
-            caption_right = max(caption_left + PANEL_DEFAULTS.min_caption_width_px, button_x - PANEL_DEFAULTS.caption_button_gap_px)
+            caption_right = max(caption_left + PANEL_DEFAULTS.min_caption_width_px, int(round(orb_center_x - orb_radius - PANEL_DEFAULTS.caption_button_gap_px)))
         else:
-            button_x = max(0, padding)
-            caption_left = min(panel_w, button_x + button_size + PANEL_DEFAULTS.caption_button_gap_px)
+            orb_center_x = PANEL_DEFAULTS.edge_overhang_px
+            caption_left = min(panel_w, int(round(orb_center_x + orb_radius + PANEL_DEFAULTS.caption_button_gap_px)))
             caption_right = max(caption_left + PANEL_DEFAULTS.min_caption_width_px, panel_w - padding)
-
-        self._collapse_button.move(button_x, button_y)
 
         caption_width = max(8, caption_right - caption_left)
         self._caption_label.setGeometry(caption_left, 0, caption_width, panel_h)
+
+    def _compute_anchor_orb_rect(self):
+        panel_h = self.height()
+        diameter = float(PANEL_DEFAULTS.anchor_orb_diameter_px)
+        radius = diameter * 0.5
+        center_y = panel_h * 0.5
+        if self._edge == ORB_PRESENTATION_DEFAULTS.edge_right:
+            center_x = self.width() - float(PANEL_DEFAULTS.edge_overhang_px)
+        else:
+            center_x = float(PANEL_DEFAULTS.edge_overhang_px)
+        return QRectF(center_x - radius, center_y - radius, diameter, diameter)
+
+    def _is_on_anchor_orb(self, point) -> bool:
+        if self._anchor_orb_rect is None:
+            return False
+        center_x = self._anchor_orb_rect.center().x()
+        center_y = self._anchor_orb_rect.center().y()
+        radius = self._anchor_orb_rect.width() * 0.5
+        dx = point.x() - center_x
+        dy = point.y() - center_y
+        return math.hypot(dx, dy) <= radius

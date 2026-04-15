@@ -360,14 +360,6 @@ class RoiSelectorOverlay(QWidget):
             self.selection_cancelled.emit()
             self.close()
             return
-
-        if self._is_valid_rect(self._locked_rect):
-            self.roi_confirmed.emit(
-                self._locked_rect.x(),
-                self._locked_rect.y(),
-                self._locked_rect.width(),
-                self._locked_rect.height(),
-            )
         self._clear_roi()
         self._set_state(SELECTOR_DEFAULTS.state_idle)
         self.close()
@@ -388,6 +380,12 @@ class RoiSelectorOverlay(QWidget):
         if confirm and self._is_valid_rect(self._roi_rect):
             self._emit_cancel_on_finish = False
             self._locked_rect = QRect(self._roi_rect)
+            self.roi_confirmed.emit(
+                self._locked_rect.x(),
+                self._locked_rect.y(),
+                self._locked_rect.width(),
+                self._locked_rect.height(),
+            )
             if self._debug:
                 print(
                     f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "

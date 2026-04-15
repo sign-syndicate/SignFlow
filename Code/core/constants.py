@@ -46,6 +46,10 @@ class OrbPresentationDefaults:
 @dataclass(frozen=True)
 class PanelDefaults:
     caption_placeholder: str = "Listening..."
+    edge_overhang_px: int = 28
+    anchor_orb_diameter_px: int = 56
+    anchor_orb_border_px: int = 1
+    anchor_orb_shadow_alpha: int = 44
     caption_update_ms: int = 100
     caption_font_px: int = 16
     caption_weight: int = 600

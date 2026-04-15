@@ -92,7 +92,11 @@ class FloatingOrb(QWidget):
         self._pressing = False
         self._press_global = QPoint()
         self._press_window_pos = QPoint()
+        self._panel_press_global = QPoint()
+        self._panel_press_window_pos = QPoint()
         self._drag_threshold_exceeded = False
+        self._panel_dragging = False
+        self._panel_drag_threshold_exceeded = False
         self._drag_start_distance = QApplication.startDragDistance()
         self._positioned = False
         self._snap_animation = None
@@ -126,8 +130,6 @@ class FloatingOrb(QWidget):
         self._panel_anchor_center_y = 0.0
         self._panel_rect = QRectF()
         self._panel_caption_text = PANEL_DEFAULTS.caption_placeholder
-        self._panel_restore_pos = QPoint()
-        self._panel_restore_hidden = False
         self._hover_target_active = False
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
@@ -150,6 +152,9 @@ class FloatingOrb(QWidget):
         self._panel_content.set_caption(self._panel_caption_text)
         self._panel_content.set_edge(self._dock_side)
         self._panel_content.collapse_requested.connect(self.panel_to_orb_transition)
+        self._panel_content.drag_started.connect(self._on_panel_drag_started)
+        self._panel_content.drag_moved.connect(self._on_panel_drag_moved)
+        self._panel_content.drag_released.connect(self._on_panel_drag_released)
         self._panel_content.hide()
 
         self._breathing_animation = QPropertyAnimation(self, b"scale", self)
@@ -276,8 +281,6 @@ class FloatingOrb(QWidget):
         self._stop_snap_animation()
         self._stop_dock_animation()
         self._cancel_idle_timer()
-        self._panel_restore_pos = QPoint(self.pos())
-        self._panel_restore_hidden = bool(self._dock_hidden)
         self._dock_hidden = False
         if self._menu_interactions_blocked() and self._menu_open:
             self._close_menu()
@@ -291,12 +294,16 @@ class FloatingOrb(QWidget):
         self._menu_node_progress = 0.0
 
         center_global = self.mapToGlobal(self.rect().center())
-        orb_radius = (self.BASE_DIAMETER * self._scale) * 0.5
+        screen = self._screen_for_point(center_global)
+        if screen is None:
+            return
+
         self._panel_anchor_center_y = float(center_global.y())
+        panel_overhang = float(PANEL_DEFAULTS.edge_overhang_px)
         if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
-            self._panel_anchor_edge_x = float(center_global.x()) + orb_radius
+            self._panel_anchor_edge_x = float(center_global.x()) + panel_overhang
         else:
-            self._panel_anchor_edge_x = float(center_global.x()) - orb_radius
+            self._panel_anchor_edge_x = float(center_global.x()) - panel_overhang
 
         self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_transition_to_panel
         self._panel_content.set_edge(self._dock_side)
@@ -562,6 +569,93 @@ class FloatingOrb(QWidget):
         self._panel_rect = QRectF(0.0, 0.0, float(new_w), float(new_h))
         self._update_panel_chrome_geometry()
 
+    def _on_panel_drag_started(self, global_pos: QPoint):
+        if self._presentation_state != ORB_PRESENTATION_DEFAULTS.state_panel:
+            return
+        self._panel_dragging = False
+        self._panel_drag_threshold_exceeded = False
+        self._panel_press_global = QPoint(global_pos)
+        self._panel_press_window_pos = QPoint(self.pos())
+        self._stop_snap_animation()
+        self._stop_dock_animation()
+
+    def _on_panel_drag_moved(self, global_pos: QPoint):
+        if self._presentation_state != ORB_PRESENTATION_DEFAULTS.state_panel:
+            return
+
+        delta = global_pos - self._panel_press_global
+        if delta.manhattanLength() >= self._drag_start_distance:
+            self._panel_drag_threshold_exceeded = True
+
+        if not self._panel_drag_threshold_exceeded:
+            return
+
+        self._panel_dragging = True
+        target = self._panel_press_window_pos + delta
+        screen = self._screen_for_point(global_pos)
+        if screen is None:
+            return
+
+        clamped = self._clamp_panel_to_screen(target, screen)
+        self.move(clamped)
+
+        geometry = screen.availableGeometry()
+        panel_center_x = self.x() + (self.width() * 0.5)
+        next_side = (
+            ORB_PRESENTATION_DEFAULTS.edge_left
+            if panel_center_x < geometry.center().x()
+            else ORB_PRESENTATION_DEFAULTS.edge_right
+        )
+        if next_side != self._dock_side:
+            self._dock_side = next_side
+            self._panel_content.set_edge(self._dock_side)
+
+    def _on_panel_drag_released(self, global_pos: QPoint):
+        if self._presentation_state != ORB_PRESENTATION_DEFAULTS.state_panel:
+            return
+
+        dragged = self._panel_drag_threshold_exceeded
+        self._panel_dragging = False
+        self._panel_drag_threshold_exceeded = False
+        if not dragged:
+            return
+        self._snap_panel_to_nearest_edge(global_pos)
+
+    def _clamp_panel_to_screen(self, position: QPoint, screen) -> QPoint:
+        geometry = screen.availableGeometry()
+        overhang = int(PANEL_DEFAULTS.edge_overhang_px)
+        min_x = geometry.left() - overhang
+        max_x = (geometry.right() + 1) - self.width() + overhang
+        x = max(min_x, min(position.x(), max_x))
+        y = self._clamp_y(position.y(), geometry)
+        return QPoint(x, y)
+
+    def _snap_panel_to_nearest_edge(self, global_pos: QPoint):
+        screen = self._screen_for_point(global_pos)
+        if screen is None:
+            return
+
+        geometry = screen.availableGeometry()
+        panel_center_x = self.x() + (self.width() * 0.5)
+        self._dock_side = (
+            ORB_PRESENTATION_DEFAULTS.edge_left
+            if panel_center_x < geometry.center().x()
+            else ORB_PRESENTATION_DEFAULTS.edge_right
+        )
+        self._panel_content.set_edge(self._dock_side)
+
+        overhang = int(PANEL_DEFAULTS.edge_overhang_px)
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
+            target_x = geometry.left() - overhang
+            self._panel_anchor_edge_x = float(geometry.left()) - float(overhang)
+        else:
+            target_x = (geometry.right() + 1) - self.width() + overhang
+            self._panel_anchor_edge_x = float(geometry.right() + 1) + float(overhang)
+
+        target_y = self._clamp_y(self.y(), geometry)
+        self._panel_anchor_center_y = float(target_y + (self.height() * 0.5))
+        self._animate_to_position(QPoint(target_x, target_y), self.DOCK_ANIMATION_MS, QEasingCurve.OutCubic, use_snap_animation=True)
+
     def _update_panel_chrome_geometry(self):
         if not self._panel_visual_active():
             self._panel_content.hide()
@@ -735,20 +829,22 @@ class FloatingOrb(QWidget):
             self.update()
 
     def _restore_orb_canvas_geometry(self):
-        restore_pos = QPoint(self._panel_restore_pos)
-        self.setGeometry(restore_pos.x(), restore_pos.y(), self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
+        panel_overhang = float(PANEL_DEFAULTS.edge_overhang_px)
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
+            orb_center_x = self._panel_anchor_edge_x - panel_overhang
+        else:
+            orb_center_x = self._panel_anchor_edge_x + panel_overhang
 
-        screen = self._screen_for_point(self._orb_center_point())
+        center_point = QPoint(int(round(orb_center_x)), int(round(self._panel_anchor_center_y)))
+        screen = self._screen_for_point(center_point)
         if screen is None:
             return
 
-        self._dock_hidden = bool(self._panel_restore_hidden)
-        if self._dock_hidden:
-            self.move(self._dock_hidden_target(screen))
-            self.displayOpacity = self.HIDDEN_OPACITY
-            return
+        x = int(round(orb_center_x - (self.WIDGET_DIAMETER * 0.5)))
+        y = int(round(self._panel_anchor_center_y - (self.WIDGET_DIAMETER * 0.5)))
+        self.setGeometry(x, y, self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
 
-        self.move(self._dock_visible_target(screen))
+        self._dock_hidden = False
         self.displayOpacity = 1.0
 
     def _install_global_click_filter(self):
@@ -1277,6 +1373,9 @@ class FloatingOrb(QWidget):
             self._idle_timer.stop()
 
     def _reset_idle_timer(self):
+        if self._is_roi_active():
+            self._cancel_idle_timer()
+            return
         if self._panel_visual_active():
             self._cancel_idle_timer()
             return
@@ -1298,6 +1397,8 @@ class FloatingOrb(QWidget):
         return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
 
     def _auto_hide_if_idle(self):
+        if self._is_roi_active():
+            return
         if self._panel_visual_active():
             return
         if self._menu_interactions_blocked():
@@ -1397,6 +1498,17 @@ class FloatingOrb(QWidget):
         return geometry.x() + geometry.width() - visible_width
 
     def _update_magnetic_offset(self):
+        if self._is_roi_active() and not self._panel_visual_active():
+            if self._dock_hidden:
+                self._dock_hidden = False
+                self._animate_dock_visibility(True)
+            if self._magnet_offset != QPointF(0.0, 0.0):
+                self._magnet_offset = QPointF(0.0, 0.0)
+            self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.25
+            self._hover_target_active = False
+            self.update()
+            return
+
         if self._panel_visual_active():
             self._border_phase = (self._border_phase + 0.42) % 360.0
             self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.22
