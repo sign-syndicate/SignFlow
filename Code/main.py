@@ -34,23 +34,28 @@ def main():
             print(f"stored roi: {x}, {y}, {w}, {h}")
         selector["widget"] = None
 
-    overlay = RoiSelectorOverlay(theme, debug=config.debug)
-    overlay.roi_confirmed.connect(_on_roi_confirmed)
-    overlay.selection_cancelled.connect(_on_selection_cancelled)
-    overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
-    selector["widget"] = overlay
+    def _get_or_create_overlay():
+        active = selector["widget"]
+        if active is not None:
+            return active
+
+        overlay = RoiSelectorOverlay(theme, debug=config.debug)
+        overlay.roi_confirmed.connect(_on_roi_confirmed)
+        overlay.selection_cancelled.connect(_on_selection_cancelled)
+        overlay.destroyed.connect(lambda *_: selector.__setitem__("widget", None))
+        selector["widget"] = overlay
+        return overlay
 
     def _open_selector_overlay():
         active_selector = selector["widget"]
         if active_selector is not None and active_selector.isVisible():
             return
 
+        overlay = _get_or_create_overlay()
         QTimer.singleShot(0, overlay.start)
 
     orb.activated.connect(_open_selector_overlay)
     orb.show()
-
-    QTimer.singleShot(120, overlay.prime)
 
     app._signflow_orb = orb
     app._signflow_tray = tray

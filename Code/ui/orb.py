@@ -1123,6 +1123,15 @@ class FloatingOrb(QWidget):
             self.update()
             return
 
+        if self._starting_up:
+            # Startup interaction is blocked, so skip cursor/screen math to keep entry smooth.
+            if self._magnet_offset != QPointF(0.0, 0.0):
+                self._magnet_offset = QPointF(0.0, 0.0)
+            if self._cursor_proximity > 0.0:
+                self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.25
+            self.update()
+            return
+
         if self._menu_interactions_blocked():
             self._update_menu_hover_state()
             if self._magnet_offset != QPointF(0.0, 0.0):
