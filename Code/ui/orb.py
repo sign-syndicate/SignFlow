@@ -4,9 +4,10 @@ import math
 
 from PyQt5.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty, pyqtSignal
 from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
-from PyQt5.QtWidgets import QApplication, QGraphicsOpacityEffect, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ..core.theme import Theme
+from .panel import OrbPanelContent
 
 
 class OrbSettingsWindow(QWidget):
@@ -123,8 +124,10 @@ class FloatingOrb(QWidget):
         self._panel_anchor_edge_x = 0.0
         self._panel_anchor_center_y = 0.0
         self._panel_rect = QRectF()
-        self._panel_animation = None
         self._panel_caption_text = "Listening..."
+        self._panel_restore_pos = QPoint()
+        self._panel_restore_hidden = False
+        self._hover_target_active = False
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.setInterval(self.AUTO_HIDE_DELAY_MS)
@@ -142,26 +145,11 @@ class FloatingOrb(QWidget):
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_Hover, True)
 
-        self._caption_label = QLabel(self)
-        self._caption_label.setText(self._panel_caption_text)
-        self._caption_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        self._caption_label.hide()
-
-        self._caption_opacity_effect = QGraphicsOpacityEffect(self._caption_label)
-        self._caption_opacity_effect.setOpacity(1.0)
-        self._caption_label.setGraphicsEffect(self._caption_opacity_effect)
-
-        self._caption_update_animation = QPropertyAnimation(self._caption_opacity_effect, b"opacity", self)
-        self._caption_update_animation.setDuration(100)
-        self._caption_update_animation.setEasingCurve(QEasingCurve.OutCubic)
-
-        self._panel_close_button = QPushButton("X", self)
-        self._panel_close_button.setCursor(Qt.PointingHandCursor)
-        self._panel_close_button.setFocusPolicy(Qt.NoFocus)
-        self._panel_close_button.setFixedSize(22, 22)
-        self._panel_close_button.clicked.connect(self.panel_to_orb_transition)
-        self._panel_close_button.hide()
-        self._apply_panel_chrome_theme()
+        self._panel_content = OrbPanelContent(self._theme, self)
+        self._panel_content.set_caption(self._panel_caption_text)
+        self._panel_content.set_edge(self._dock_side)
+        self._panel_content.collapse_requested.connect(self.panel_to_orb_transition)
+        self._panel_content.hide()
 
         self._breathing_animation = QPropertyAnimation(self, b"scale", self)
         self._breathing_animation.setDuration(2800)
@@ -284,6 +272,8 @@ class FloatingOrb(QWidget):
         self._stop_snap_animation()
         self._stop_dock_animation()
         self._cancel_idle_timer()
+        self._panel_restore_pos = QPoint(self.pos())
+        self._panel_restore_hidden = bool(self._dock_hidden)
         self._dock_hidden = False
         if self._menu_interactions_blocked() and self._menu_open:
             self._close_menu()
@@ -305,9 +295,9 @@ class FloatingOrb(QWidget):
             self._panel_anchor_edge_x = float(center_global.x()) - orb_radius
 
         self._presentation_state = "transition_to_panel"
-        self._caption_label.show()
-        self._panel_close_button.show()
-        self._caption_opacity_effect.setOpacity(1.0)
+        self._panel_content.set_edge(self._dock_side)
+        self._panel_content.show()
+        self._panel_content.raise_()
 
         self._panel_morph_animation.stop()
         self._panel_morph_animation.setStartValue(self._panel_morph)
@@ -331,12 +321,7 @@ class FloatingOrb(QWidget):
         if not safe_text:
             safe_text = "Listening..."
         self._panel_caption_text = safe_text
-        self._caption_label.setText(self._panel_caption_text)
-
-        self._caption_update_animation.stop()
-        self._caption_update_animation.setStartValue(0.72)
-        self._caption_update_animation.setEndValue(1.0)
-        self._caption_update_animation.start()
+        self._panel_content.animate_caption_update(self._panel_caption_text)
 
     def on_roi_confirmed(self, _x: int, _y: int, _w: int, _h: int):
         QTimer.singleShot(self.PANEL_TRANSITION_DELAY_MS, self.orb_to_panel_transition)
@@ -526,33 +511,6 @@ class FloatingOrb(QWidget):
         painter.setBrush(shadow_gradient)
         painter.drawRoundedRect(shadow_rect, panel_rect.height() * 0.5 + 8.0, panel_rect.height() * 0.5 + 8.0)
 
-        base = QColor(self._theme.base_color)
-        base.setAlpha(236)
-        top_tint = QColor(self._theme.hover_color)
-        top_tint.setAlpha(50 if self._theme.name == "APPLE" else 44)
-        fill_gradient = QLinearGradient(panel_rect.topLeft(), panel_rect.bottomLeft())
-        fill_gradient.setColorAt(0.0, top_tint)
-        fill_gradient.setColorAt(0.38, base)
-        fill_gradient.setColorAt(1.0, QColor(base.red(), base.green(), base.blue(), 248))
-
-        border = QColor(self._theme.primary_color)
-        border.setAlpha(74 if self._theme.name == "APPLE" else 108)
-        border_pen = QPen(border, 1.1)
-        border_pen.setJoinStyle(Qt.RoundJoin)
-        border_pen.setCapStyle(Qt.RoundCap)
-
-        painter.setPen(border_pen)
-        painter.setBrush(fill_gradient)
-        radius = self._panel_current_radius()
-        painter.drawRoundedRect(panel_rect, radius, radius)
-
-        sheen = QLinearGradient(panel_rect.topLeft(), panel_rect.topRight())
-        sheen.setColorAt(0.0, QColor(255, 255, 255, 42 if self._theme.name == "APPLE" else 22))
-        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(sheen)
-        painter.drawRoundedRect(panel_rect.adjusted(1.0, 1.0, -1.0, -panel_rect.height() * 0.54), max(2.0, radius - 2.0), max(2.0, radius - 2.0))
-
     def _panel_visual_active(self) -> bool:
         return self._presentation_state != "orb" or self._panel_morph > 0.001
 
@@ -575,48 +533,6 @@ class FloatingOrb(QWidget):
     def _panel_current_padding(self) -> float:
         return self._lerp(0.0, self.PANEL_PADDING, self._ease_out_cubic(self._panel_refine_phase()))
 
-    def _apply_panel_chrome_theme(self):
-        if self._theme.name == "APPLE":
-            caption_color = "#1F1F22"
-            close_color = "rgba(28, 28, 31, 216)"
-            close_bg = "rgba(0, 0, 0, 9)"
-            close_bg_hover = "rgba(0, 0, 0, 14)"
-            close_bg_pressed = "rgba(0, 0, 0, 18)"
-            close_border = "rgba(0, 0, 0, 16)"
-        else:
-            caption_color = "#ECECEF"
-            close_color = "rgba(236, 236, 236, 220)"
-            close_bg = "rgba(255, 255, 255, 12)"
-            close_bg_hover = "rgba(255, 255, 255, 20)"
-            close_bg_pressed = "rgba(255, 255, 255, 30)"
-            close_border = "rgba(255, 255, 255, 22)"
-
-        self._caption_label.setStyleSheet(
-            "color: " + caption_color + ";"
-            "font-size: 16px;"
-            "font-weight: 600;"
-            "background: transparent;"
-            "border: none;"
-        )
-
-        self._panel_close_button.setStyleSheet(
-            "QPushButton {"
-            "color: " + close_color + ";"
-            "font-size: 12px;"
-            "font-weight: 700;"
-            "background: " + close_bg + ";"
-            "border: 1px solid " + close_border + ";"
-            "border-radius: 11px;"
-            "padding: 0px;"
-            "}"
-            "QPushButton:hover {"
-            "background: " + close_bg_hover + ";"
-            "}"
-            "QPushButton:pressed {"
-            "background: " + close_bg_pressed + ";"
-            "}"
-        )
-
     def _sync_panel_geometry_from_morph(self):
         if not self._panel_visual_active():
             return
@@ -637,36 +553,20 @@ class FloatingOrb(QWidget):
 
     def _update_panel_chrome_geometry(self):
         if not self._panel_visual_active():
-            self._caption_label.hide()
-            self._panel_close_button.hide()
+            self._panel_content.hide()
             return
 
-        self._caption_label.show()
-        self._panel_close_button.show()
+        self._panel_content.show()
+        self._panel_content.raise_()
 
         panel_w = int(round(self._panel_rect.width()))
         panel_h = int(round(self._panel_rect.height()))
         padding = int(round(self._panel_current_padding()))
-        close_size = self._panel_close_button.width()
-
-        top = max(0, padding)
-        if self._dock_side == "right":
-            close_x = max(0, panel_w - padding - close_size)
-        else:
-            close_x = max(0, padding)
-        self._panel_close_button.move(close_x, top)
-
-        close_block = close_size + 8
-        if self._dock_side == "right":
-            caption_left = max(0, padding)
-            caption_right = max(caption_left + self.PANEL_CAPTION_MIN_WIDTH, panel_w - padding - close_block)
-        else:
-            caption_left = min(panel_w - padding, padding + close_block)
-            caption_right = max(caption_left + self.PANEL_CAPTION_MIN_WIDTH, panel_w - padding)
-
-        caption_width = max(10, caption_right - caption_left)
-        caption_y = max(0, int(round((panel_h - 34) * 0.5)))
-        self._caption_label.setGeometry(caption_left, caption_y, caption_width, 34)
+        self._panel_content.setGeometry(0, 0, panel_w, panel_h)
+        self._panel_content.set_edge(self._dock_side)
+        self._panel_content.set_padding(padding)
+        self._panel_content.set_radius(self._panel_current_radius())
+        self._panel_content.set_morph(self._panel_morph)
 
     @staticmethod
     def _lerp(start: float, end: float, t: float) -> float:
@@ -682,7 +582,7 @@ class FloatingOrb(QWidget):
             event.accept()
             return
         if self._panel_visual_active():
-            event.ignore()
+            event.accept()
             return
 
         if event.button() == Qt.RightButton:
@@ -726,7 +626,7 @@ class FloatingOrb(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._panel_visual_active():
-            event.ignore()
+            event.accept()
             return
         if self._menu_interactions_blocked():
             self._update_menu_hover_state(event.pos())
@@ -756,7 +656,7 @@ class FloatingOrb(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self._panel_visual_active():
-            event.ignore()
+            event.accept()
             return
         if self._menu_interactions_blocked():
             event.accept()
@@ -783,6 +683,9 @@ class FloatingOrb(QWidget):
     def _animate_hover(self, active: bool):
         if self._menu_interactions_blocked() or self._panel_visual_active():
             return
+        if active == self._hover_target_active and self._hover_animation.state() == QAbstractAnimation.Running:
+            return
+        self._hover_target_active = bool(active)
         self._hover_animation.stop()
         self._hover_animation.setStartValue(self._hover_progress)
         self._hover_animation.setEndValue(1.0 if active else 0.0)
@@ -790,6 +693,7 @@ class FloatingOrb(QWidget):
 
     def _set_hover_state(self, active: bool):
         self._hover_animation.stop()
+        self._hover_target_active = bool(active)
         self.hoverProgress = 1.0 if active else 0.0
 
     def _menu_visual_active(self) -> bool:
@@ -812,8 +716,7 @@ class FloatingOrb(QWidget):
         if self._presentation_state == "transition_to_orb":
             self._presentation_state = "orb"
             self._panel_morph = 0.0
-            self._caption_label.hide()
-            self._panel_close_button.hide()
+            self._panel_content.hide()
             self._restore_orb_canvas_geometry()
             if self._breathing_animation.state() != QAbstractAnimation.Running:
                 self._breathing_animation.start()
@@ -821,15 +724,21 @@ class FloatingOrb(QWidget):
             self.update()
 
     def _restore_orb_canvas_geometry(self):
-        orb_center_global = QPoint(int(round(self._panel_anchor_edge_x)), int(round(self._panel_anchor_center_y)))
-        if self._dock_side == "right":
-            orb_center_global.setX(int(round(self._panel_anchor_edge_x - (self.BASE_DIAMETER * 0.5))))
-        else:
-            orb_center_global.setX(int(round(self._panel_anchor_edge_x + (self.BASE_DIAMETER * 0.5))))
+        restore_pos = QPoint(self._panel_restore_pos)
+        self.setGeometry(restore_pos.x(), restore_pos.y(), self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
 
-        target_x = int(round(orb_center_global.x() - (self.WIDGET_DIAMETER * 0.5)))
-        target_y = int(round(orb_center_global.y() - (self.WIDGET_DIAMETER * 0.5)))
-        self.setGeometry(target_x, target_y, self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
+        screen = self._screen_for_point(self._orb_center_point())
+        if screen is None:
+            return
+
+        self._dock_hidden = bool(self._panel_restore_hidden)
+        if self._dock_hidden:
+            self.move(self._dock_hidden_target(screen))
+            self.displayOpacity = self.HIDDEN_OPACITY
+            return
+
+        self.move(self._dock_visible_target(screen))
+        self.displayOpacity = 1.0
 
     def _install_global_click_filter(self):
         app = QApplication.instance()
@@ -1369,7 +1278,9 @@ class FloatingOrb(QWidget):
     def _under_active_interaction(self) -> bool:
         if self._menu_interactions_blocked():
             return True
-        return self.underMouse() or self._hover_progress > 0.01
+        if self._pressing or self._dragging:
+            return True
+        return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
 
     def _auto_hide_if_idle(self):
         if self._panel_visual_active():
@@ -1478,6 +1389,7 @@ class FloatingOrb(QWidget):
                 self._magnet_offset = QPointF(0.0, 0.0)
             self._menu_hover_top += (0.0 - self._menu_hover_top) * self.MENU_NODE_HOVER_LERP
             self._menu_hover_bottom += (0.0 - self._menu_hover_bottom) * self.MENU_NODE_HOVER_LERP
+            self._hover_target_active = False
             self.update()
             return
 
@@ -1508,6 +1420,13 @@ class FloatingOrb(QWidget):
                 self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.25
             self.update()
             return
+
+        cursor_inside = self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+        if not self._dragging and not self._pressing:
+            if cursor_inside and not self._hover_target_active:
+                self._animate_hover(True)
+            elif not cursor_inside and self._hover_target_active:
+                self._animate_hover(False)
 
         if self._menu_hover_top > 0.001 or self._menu_hover_bottom > 0.001:
             self._menu_hover_top += (0.0 - self._menu_hover_top) * self.MENU_NODE_HOVER_LERP
