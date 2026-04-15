@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty, pyqtSignal
+from PyQt5.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty, pyqtSignal
 from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -67,6 +67,8 @@ class FloatingOrb(QWidget):
     QUIT_EXIT_MS = 190
     QUIT_EXIT_DROP_PX = 8
     QUIT_EXIT_OPACITY = 0.74
+    STARTUP_ENTRY_MARGIN_PX = 12
+    STARTUP_UNLOCK_GRACE_MS = 40
 
     def __init__(self, theme: Theme, debug: bool = False, magnetic_effect_enabled: bool = True, parent=None):
         super().__init__(parent)
@@ -88,6 +90,7 @@ class FloatingOrb(QWidget):
         self._dock_animation = None
         self._opacity_animation = None
         self._quit_move_animation = None
+        self._startup_move_animation = None
         self._border_phase = 0.0
         self._cursor_proximity = 0.0
         self._click_flash = 0.0
@@ -102,6 +105,7 @@ class FloatingOrb(QWidget):
         self._menu_mouse_grabbed = False
         self._pending_quit = False
         self._quitting = False
+        self._starting_up = False
         self._menu_hover_top = 0.0
         self._menu_hover_bottom = 0.0
         self._menu_hover_top_target = 0.0
@@ -224,6 +228,9 @@ class FloatingOrb(QWidget):
         super().showEvent(event)
         if not self._positioned:
             self._position_initially()
+        elif self._starting_up and self._startup_move_animation is None:
+            # Defensive fallback: never leave startup interaction lock active.
+            self._starting_up = False
         self._dock_hidden = False
         self._reset_idle_timer()
         if self._debug:
@@ -231,6 +238,7 @@ class FloatingOrb(QWidget):
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
 
     def closeEvent(self, event):
+        self._stop_startup_move_animation()
         self._stop_quit_move_animation()
         self._release_menu_mouse_grab()
         self._remove_global_click_filter()
@@ -245,7 +253,7 @@ class FloatingOrb(QWidget):
         super().closeEvent(event)
 
     def enterEvent(self, event):
-        if self._quitting:
+        if self._quitting or self._starting_up:
             super().enterEvent(event)
             return
         if self._menu_interactions_blocked():
@@ -257,7 +265,7 @@ class FloatingOrb(QWidget):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if self._quitting:
+        if self._quitting or self._starting_up:
             super().leaveEvent(event)
             return
         if self._menu_interactions_blocked():
@@ -372,7 +380,7 @@ class FloatingOrb(QWidget):
             painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
     def mousePressEvent(self, event):
-        if self._quitting:
+        if self._quitting or self._starting_up:
             event.accept()
             return
 
@@ -522,7 +530,7 @@ class FloatingOrb(QWidget):
         return False
 
     def _can_open_menu(self) -> bool:
-        return not self._quitting and not self._dragging and not self._pressing and not self._is_roi_active()
+        return not self._quitting and not self._starting_up and not self._dragging and not self._pressing and not self._is_roi_active()
 
     def _open_menu(self):
         if self._menu_open and not self._menu_animating:
@@ -878,12 +886,55 @@ class FloatingOrb(QWidget):
         y = geometry.y() + (geometry.height() - self.height()) // 2
         self._dock_side = "right"
         self._dock_hidden = False
-        start_position = self._dock_visible_target(screen)
-        self.move(QPoint(start_position.x(), self._clamp_y(y, geometry)))
+        visible_position = self._dock_visible_target(screen)
+        visible_position.setY(self._clamp_y(y, geometry))
+
+        # Mirror the quit motion so launch feels intentional: enter from the dock edge while fading in.
+        margin = int(self.STARTUP_ENTRY_MARGIN_PX)
+        if self._dock_side == "left":
+            start_x = geometry.left() - self.width() - margin
+        else:
+            start_x = geometry.right() + 1 + margin
+        start_y = self._clamp_y(visible_position.y() + self.QUIT_EXIT_DROP_PX, geometry)
+        self.move(QPoint(start_x, start_y))
+        self.displayOpacity = self.QUIT_EXIT_OPACITY
+
         self._positioned = True
+        self._start_startup_entry_animation(visible_position)
         self._reset_idle_timer()
         if self._debug:
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
+
+    def _start_startup_entry_animation(self, target: QPoint):
+        self._stop_startup_move_animation()
+        self._starting_up = True
+        self._startup_move_animation = QPropertyAnimation(self, b"pos", self)
+        self._startup_move_animation.setDuration(self.QUIT_EXIT_MS)
+        self._startup_move_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._startup_move_animation.setStartValue(self.pos())
+        self._startup_move_animation.setEndValue(target)
+        self._startup_move_animation.finished.connect(self._on_startup_entry_animation_finished)
+        self._startup_move_animation.start()
+        self._animate_display_opacity(1.0, duration=self.QUIT_EXIT_MS)
+        QTimer.singleShot(self.QUIT_EXIT_MS + self.STARTUP_UNLOCK_GRACE_MS, self._ensure_startup_entry_unlocked)
+
+    def _stop_startup_move_animation(self):
+        if self._startup_move_animation is not None:
+            self._startup_move_animation.stop()
+            self._startup_move_animation.deleteLater()
+            self._startup_move_animation = None
+
+    def _on_startup_entry_animation_finished(self):
+        self._stop_startup_move_animation()
+        self._starting_up = False
+        self._reset_idle_timer()
+
+    def _ensure_startup_entry_unlocked(self):
+        if not self._starting_up:
+            return
+        if self._startup_move_animation is not None and self._startup_move_animation.state() == QAbstractAnimation.Running:
+            return
+        self._on_startup_entry_animation_finished()
 
     def _snap_to_nearest_edge(self):
         screen = self._screen_for_point(QCursor.pos())
@@ -1062,7 +1113,8 @@ class FloatingOrb(QWidget):
         return geometry.x() + geometry.width() - visible_width
 
     def _update_magnetic_offset(self):
-        self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
+        phase_step = 1.08 if self._starting_up else 0.42
+        self._border_phase = (self._border_phase + phase_step + (self._cursor_proximity * 0.18)) % 360.0
 
         ring_target = max(0.0, min(1.0, float(self._hover_progress)))
         self._inner_ring_progress += (ring_target - self._inner_ring_progress) * 0.18
