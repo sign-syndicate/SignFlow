@@ -26,6 +26,7 @@ class OrbPanelContent(QWidget):
         self._padding = 14
         self._dragging = False
         self._anchor_orb_rect = None
+        self._border_phase = 0.0
 
         self._caption_label = QLabel(PANEL_DEFAULTS.caption_placeholder, self)
         self._caption_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
@@ -61,6 +62,11 @@ class OrbPanelContent(QWidget):
         self._caption_label.setVisible(visible)
         self._apply_layout()
         self.update()
+
+    def set_border_phase(self, phase: float):
+        self._border_phase = float(phase) % 360.0
+        if self._morph > 0.001:
+            self.update()
 
     def set_caption(self, text: str):
         safe_text = str(text).strip() if text is not None else ""
@@ -217,7 +223,7 @@ class OrbPanelContent(QWidget):
         ring_width = 2.3 if self._theme.name == "APPLE" else 2.05
         segment_span = 13.0
         slots = 8
-        phase = 0.0
+        phase = self._border_phase
         if self._theme.name == "APPLE":
             border_color = QColor(221, 221, 221, 232)
         else:

@@ -56,7 +56,7 @@ class PanelDefaults:
     collapse_button_size_px: int = 24
     collapse_button_font_px: int = 12
     collapse_button_weight: int = 700
-    min_caption_width_px: int = 120
+    min_caption_width_px: int = 240
     caption_button_gap_px: int = 8
 
 
