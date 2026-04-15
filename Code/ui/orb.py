@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, Qt, QTimer, pyqtProperty, pyqtSignal
-from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPen, QRadialGradient
+from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ..core.theme import Theme
@@ -59,6 +59,8 @@ class FloatingOrb(QWidget):
     MENU_NODE_MS = 80
     MENU_SPINE_RATIO = 1.35
     MENU_NODE_RATIO = 0.75
+    MENU_ICON_BOX_RATIO = 1.24
+    MENU_ICON_STROKE_RATIO = 0.22
 
     def __init__(self, theme: Theme, debug: bool = False, magnetic_effect_enabled: bool = True, parent=None):
         super().__init__(parent)
@@ -601,42 +603,35 @@ class FloatingOrb(QWidget):
         painter.drawEllipse(rect.adjusted(2.0, 2.0, -2.0, -2.0))
 
     def _draw_settings_icon(self, painter: QPainter, node_center: QPointF, radius: float):
-        color = QColor("#101010" if self._theme.name == "APPLE" else "#F5F5F5")
+        color = self._menu_icon_color()
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.2, radius * 0.11))
+        pen = QPen(color, max(1.6, radius * self.MENU_ICON_STROKE_RATIO))
         pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
-        gear_radius = radius * 0.35
+        painter.drawPath(self._build_gear_outline(node_center, radius))
+
+        hole_radius = radius * 0.20
         painter.drawEllipse(
             QRectF(
-                node_center.x() - gear_radius,
-                node_center.y() - gear_radius,
-                gear_radius * 2.0,
-                gear_radius * 2.0,
+                node_center.x() - hole_radius,
+                node_center.y() - hole_radius,
+                hole_radius * 2.0,
+                hole_radius * 2.0,
             )
         )
 
-        spoke_inner = gear_radius + (radius * 0.06)
-        spoke_outer = gear_radius + (radius * 0.18)
-        for index in range(8):
-            theta = math.radians(index * 45.0)
-            c = math.cos(theta)
-            s = math.sin(theta)
-            start = QPointF(node_center.x() + c * spoke_inner, node_center.y() + s * spoke_inner)
-            end = QPointF(node_center.x() + c * spoke_outer, node_center.y() + s * spoke_outer)
-            painter.drawLine(start, end)
-
     def _draw_quit_icon(self, painter: QPainter, node_center: QPointF, radius: float):
-        color = QColor("#101010" if self._theme.name == "APPLE" else "#F5F5F5")
+        color = self._menu_icon_color()
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.4, radius * 0.15))
+        pen = QPen(color, max(1.6, radius * self.MENU_ICON_STROKE_RATIO))
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
-        inset = radius * 0.40
+        inset = radius * 0.36
         painter.drawLine(
             QPointF(node_center.x() - inset, node_center.y() - inset),
             QPointF(node_center.x() + inset, node_center.y() + inset),
@@ -645,6 +640,31 @@ class FloatingOrb(QWidget):
             QPointF(node_center.x() + inset, node_center.y() - inset),
             QPointF(node_center.x() - inset, node_center.y() + inset),
         )
+
+    def _menu_icon_color(self) -> QColor:
+        if self._theme.name == "APPLE":
+            return QColor("#343434")
+        return QColor("#ECEEEF")
+
+    def _build_gear_outline(self, node_center: QPointF, radius: float) -> QPainterPath:
+        icon_radius = radius * self.MENU_ICON_BOX_RATIO * 0.5
+        bump_radius = icon_radius * 0.18
+        path = QPainterPath()
+
+        steps = 128
+        for index in range(steps + 1):
+            theta = (math.tau * index / steps) - (math.pi / 2.0)
+            wave = math.cos(theta * 8.0)
+            r = icon_radius + (bump_radius * wave)
+            x = node_center.x() + math.cos(theta) * r
+            y = node_center.y() + math.sin(theta) * r
+            if index == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+
+        path.closeSubpath()
+        return path
 
     def _menu_action_for_point(self, local_point: QPoint) -> str:
         center = QPointF(self.rect().center())
@@ -829,7 +849,7 @@ class FloatingOrb(QWidget):
         overhang = int(self.VISIBLE_OVERHANG_PX)
         canvas_shift = int((self.width() - self.DOCK_WIDGET_DIAMETER) / 2)
         if self._dock_side == "left":
-            x = geometry.left() - overhang + canvas_shift
+            x = geometry.left() - overhang - canvas_shift
         else:
             # right() is inclusive; add +1 to convert to width-style boundary before applying overhang.
             x = geometry.right() - self.width() + 1 + overhang + canvas_shift
