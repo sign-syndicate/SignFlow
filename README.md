@@ -47,13 +47,15 @@ Documents/
 4. Creates and primes the ROI selector once (warm-up) so first-entry transition is smoother.
 5. Shows a draggable floating orb with stable edge attachment and consistent snap distance.
 6. Auto-hides the orb after idle by docking it partially into the attached edge.
-7. Reveals the orb when cursor enters the activation region.
+7. Reveals the orb when cursor enters the activation region, even when magnetic pull is disabled.
 8. Clicking the orb opens ROI mode with a dimmed full-screen overlay and a fade-in transition.
 9. Dragging defines a selection rectangle; release starts a 3-second confirmation animation.
 10. Enter/Space can skip the confirmation timer and finalize immediately.
 11. Cancel paths (ESC, right-click, or non-drag click in ROI) use animated fade-out and emit cancellation.
 12. Confirm path emits ROI coordinates and exits with the same polished fade-out timing.
 13. Keeps the app alive in the tray until Exit.
+
+The orb's cursor-driven magnetic motion is controlled by `Code/core/config.py` via `ORB_MAGNETIC_EFFECT_ENABLED`, and is currently disabled. Hover, click, scale, and cursor-proximity reveal still remain active.
 
 ## ROI Controls
 

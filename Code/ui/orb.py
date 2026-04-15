@@ -21,10 +21,11 @@ class FloatingOrb(QWidget):
     REVEAL_DISTANCE = 120.0
     HIDDEN_OPACITY = 0.70
 
-    def __init__(self, theme: Theme, debug: bool = False, parent=None):
+    def __init__(self, theme: Theme, debug: bool = False, magnetic_effect_enabled: bool = True, parent=None):
         super().__init__(parent)
         self._theme = theme
         self._debug = debug
+        self._magnetic_effect_enabled = magnetic_effect_enabled
         self._scale = 1.0
         self._hover_progress = 0.0
         self._magnet_offset = QPointF(0.0, 0.0)
@@ -510,22 +511,28 @@ class FloatingOrb(QWidget):
             else:
                 strength = (proximity_window - distance) / proximity_window
                 self._cursor_proximity += (strength - self._cursor_proximity) * 0.12
-                scale = min(7.0, 7.0 * (strength ** 1.15))
-                target = QPointF((delta.x() / distance) * scale, (delta.y() / distance) * scale)
+                if self._magnetic_effect_enabled:
+                    scale = min(7.0, 7.0 * (strength ** 1.15))
+                    target = QPointF((delta.x() / distance) * scale, (delta.y() / distance) * scale)
+                else:
+                    target = QPointF(0.0, 0.0)
 
             # Never allow magnetic motion to push the orb closer into its docked edge.
-            if self._dock_side == "right":
-                target.setX(min(0.0, target.x()))
-            else:
-                target.setX(max(0.0, target.x()))
+            if self._magnetic_effect_enabled:
+                if self._dock_side == "right":
+                    target.setX(min(0.0, target.x()))
+                else:
+                    target.setX(max(0.0, target.x()))
 
-            current = self._magnet_offset
-            next_offset = QPointF(
-                current.x() + (target.x() - current.x()) * 0.14,
-                current.y() + (target.y() - current.y()) * 0.14,
-            )
-            if (abs(next_offset.x() - current.x()) > 0.01) or (abs(next_offset.y() - current.y()) > 0.01):
-                self._magnet_offset = next_offset
+                current = self._magnet_offset
+                next_offset = QPointF(
+                    current.x() + (target.x() - current.x()) * 0.14,
+                    current.y() + (target.y() - current.y()) * 0.14,
+                )
+                if (abs(next_offset.x() - current.x()) > 0.01) or (abs(next_offset.y() - current.y()) > 0.01):
+                    self._magnet_offset = next_offset
+            elif self._magnet_offset != QPointF(0.0, 0.0):
+                self._magnet_offset = QPointF(0.0, 0.0)
         if self._dragging:
             self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.18
 

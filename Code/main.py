@@ -21,7 +21,7 @@ def main():
         print(f"theme: {theme.name}")
 
     tray = SystemTrayController(app, theme)
-    orb = FloatingOrb(theme, debug=config.debug)
+    orb = FloatingOrb(theme, debug=config.debug, magnetic_effect_enabled=config.orb_magnetic_effect_enabled)
     selector = {"widget": None}
 
     def _on_selection_cancelled():
