@@ -60,7 +60,9 @@ class FloatingOrb(QWidget):
     MENU_SPINE_RATIO = 1.35
     MENU_NODE_RATIO = 0.75
     MENU_ICON_BOX_RATIO = 1.24
-    MENU_ICON_STROKE_RATIO = 0.22
+    MENU_ICON_STROKE_RATIO = 0.16
+    MENU_NODE_HOVER_SCALE = 0.08
+    MENU_NODE_HOVER_LERP = 0.24
 
     def __init__(self, theme: Theme, debug: bool = False, magnetic_effect_enabled: bool = True, parent=None):
         super().__init__(parent)
@@ -91,6 +93,11 @@ class FloatingOrb(QWidget):
         self._menu_node_progress = 0.0
         self._menu_animating = False
         self._menu_animating_open = False
+        self._menu_mouse_grabbed = False
+        self._menu_hover_top = 0.0
+        self._menu_hover_bottom = 0.0
+        self._menu_hover_top_target = 0.0
+        self._menu_hover_bottom_target = 0.0
         self._settings_window = None
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
@@ -138,6 +145,10 @@ class FloatingOrb(QWidget):
         self._magnet_timer.setInterval(16)
         self._magnet_timer.timeout.connect(self._update_magnetic_offset)
         self._magnet_timer.start()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.applicationStateChanged.connect(self._on_application_state_changed)
 
         QTimer.singleShot(0, self._position_initially)
 
@@ -212,9 +223,16 @@ class FloatingOrb(QWidget):
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
 
     def closeEvent(self, event):
+        self._release_menu_mouse_grab()
         self._remove_global_click_filter()
         self._menu_spine_animation.stop()
         self._menu_node_animation.stop()
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.applicationStateChanged.disconnect(self._on_application_state_changed)
+            except TypeError:
+                pass
         super().closeEvent(event)
 
     def enterEvent(self, event):
@@ -256,7 +274,7 @@ class FloatingOrb(QWidget):
         painter.setOpacity(self._display_opacity)
 
         menu_visible = self._menu_visual_active()
-        effective_hover = 0.0 if menu_visible else self._hover_progress
+        effective_hover = self._hover_progress
         effective_proximity = 0.0 if menu_visible else self._cursor_proximity
 
         center = QPointF(self.rect().center())
@@ -378,6 +396,7 @@ class FloatingOrb(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._menu_interactions_blocked():
+            self._update_menu_hover_state(event.pos())
             event.accept()
             return
 
@@ -447,11 +466,31 @@ class FloatingOrb(QWidget):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+        self._grab_menu_mouse()
 
     def _remove_global_click_filter(self):
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
+        self._release_menu_mouse_grab()
+
+    def _grab_menu_mouse(self):
+        if self._menu_mouse_grabbed:
+            return
+        try:
+            self.grabMouse()
+            self._menu_mouse_grabbed = True
+        except Exception:
+            self._menu_mouse_grabbed = False
+
+    def _release_menu_mouse_grab(self):
+        if not self._menu_mouse_grabbed:
+            return
+        try:
+            self.releaseMouse()
+        except Exception:
+            pass
+        self._menu_mouse_grabbed = False
 
     def _is_roi_active(self) -> bool:
         app = QApplication.instance()
@@ -473,9 +512,13 @@ class FloatingOrb(QWidget):
         self._menu_open = True
         self._menu_animating = True
         self._menu_animating_open = True
-        self._set_hover_state(False)
+        self._set_hover_state(True)
         self._cursor_proximity = 0.0
         self._magnet_offset = QPointF(0.0, 0.0)
+        self._menu_hover_top = 0.0
+        self._menu_hover_bottom = 0.0
+        self._menu_hover_top_target = 0.0
+        self._menu_hover_bottom_target = 0.0
         self._cancel_idle_timer()
         self._install_global_click_filter()
 
@@ -492,11 +535,17 @@ class FloatingOrb(QWidget):
         self._menu_open = False
         self._menu_animating = True
         self._menu_animating_open = False
+        self._menu_hover_top_target = 0.0
+        self._menu_hover_bottom_target = 0.0
         self._menu_spine_animation.stop()
         self._menu_node_animation.stop()
         self._menu_node_animation.setStartValue(self._menu_node_progress)
         self._menu_node_animation.setEndValue(0.0)
         self._menu_node_animation.start()
+
+    def _on_application_state_changed(self, state):
+        if state != Qt.ApplicationActive and self._menu_interactions_blocked():
+            self._close_menu()
 
     def _on_menu_spine_animation_finished(self):
         if self._menu_animating_open:
@@ -509,6 +558,7 @@ class FloatingOrb(QWidget):
         self._menu_animating = False
         self._menu_animating_open = False
         self._remove_global_click_filter()
+        self._sync_hover_after_menu_close()
         self._reset_idle_timer()
 
     def _on_menu_node_animation_finished(self):
@@ -522,6 +572,11 @@ class FloatingOrb(QWidget):
         self._menu_spine_animation.setStartValue(self._menu_spine_progress)
         self._menu_spine_animation.setEndValue(0.0)
         self._menu_spine_animation.start()
+
+    def _sync_hover_after_menu_close(self):
+        local_cursor = self.mapFromGlobal(QCursor.pos())
+        is_inside = self.rect().contains(local_cursor)
+        self._set_hover_state(is_inside)
 
     def _menu_geometry(self, center: QPointF, diameter: float) -> dict:
         direction_x = 1.0 if self._dock_side == "left" else -1.0
@@ -567,16 +622,19 @@ class FloatingOrb(QWidget):
         if node_radius <= 0.05:
             return
 
-        self._draw_mini_orb(painter, geometry["top"], node_radius)
-        self._draw_mini_orb(painter, geometry["bottom"], node_radius)
-        self._draw_settings_icon(painter, geometry["top"], node_radius)
-        self._draw_quit_icon(painter, geometry["bottom"], node_radius)
+        top_scale = 1.0 + (self.MENU_NODE_HOVER_SCALE * self._menu_hover_top)
+        bottom_scale = 1.0 + (self.MENU_NODE_HOVER_SCALE * self._menu_hover_bottom)
 
-    def _draw_mini_orb(self, painter: QPainter, node_center: QPointF, radius: float):
+        self._draw_mini_orb(painter, geometry["top"], node_radius * top_scale, self._menu_hover_top)
+        self._draw_mini_orb(painter, geometry["bottom"], node_radius * bottom_scale, self._menu_hover_bottom)
+        self._draw_settings_icon(painter, geometry["top"], node_radius * top_scale)
+        self._draw_quit_icon(painter, geometry["bottom"], node_radius * bottom_scale)
+
+    def _draw_mini_orb(self, painter: QPainter, node_center: QPointF, radius: float, hover_amount: float = 0.0):
         base_color = QColor(self._theme.base_color)
         darker = QColor(self._theme.base_color).darker(122)
         highlight = QColor(self._theme.hover_color)
-        highlight.setAlpha(180)
+        highlight.setAlpha(int(168 + (40 * hover_amount)))
 
         gradient = QRadialGradient(node_center + QPointF(radius * 0.22, -radius * 0.20), radius * 1.15)
         gradient.setColorAt(0.0, highlight)
@@ -584,7 +642,7 @@ class FloatingOrb(QWidget):
         gradient.setColorAt(1.0, darker)
 
         glow = QColor(self._theme.primary_color)
-        glow.setAlpha(int(86 * self._menu_node_progress))
+        glow.setAlpha(int((84 + (58 * hover_amount)) * self._menu_node_progress))
         glow_gradient = QRadialGradient(node_center, radius * 1.45)
         glow_gradient.setColorAt(0.0, glow)
         glow_gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
@@ -605,7 +663,7 @@ class FloatingOrb(QWidget):
     def _draw_settings_icon(self, painter: QPainter, node_center: QPointF, radius: float):
         color = self._menu_icon_color()
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.6, radius * self.MENU_ICON_STROKE_RATIO))
+        pen = QPen(color, max(1.1, radius * self.MENU_ICON_STROKE_RATIO))
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -626,7 +684,7 @@ class FloatingOrb(QWidget):
     def _draw_quit_icon(self, painter: QPainter, node_center: QPointF, radius: float):
         color = self._menu_icon_color()
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.6, radius * self.MENU_ICON_STROKE_RATIO))
+        pen = QPen(color, max(1.1, radius * self.MENU_ICON_STROKE_RATIO))
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -643,8 +701,31 @@ class FloatingOrb(QWidget):
 
     def _menu_icon_color(self) -> QColor:
         if self._theme.name == "APPLE":
-            return QColor("#343434")
-        return QColor("#ECEEEF")
+            return QColor("#555555")
+        return QColor("#DCE2E8")
+
+    def _update_menu_hover_state(self, local_pos: QPoint | None = None):
+        if not self._menu_visual_active():
+            self._menu_hover_top_target = 0.0
+            self._menu_hover_bottom_target = 0.0
+        else:
+            if local_pos is None:
+                local_pos = self.mapFromGlobal(QCursor.pos())
+
+            action = "close"
+            if self.rect().contains(local_pos):
+                action = self._menu_action_for_point(local_pos)
+
+            self._menu_hover_top_target = 1.0 if action == "settings" else 0.0
+            self._menu_hover_bottom_target = 1.0 if action == "quit" else 0.0
+
+        prev_top = self._menu_hover_top
+        prev_bottom = self._menu_hover_bottom
+        self._menu_hover_top += (self._menu_hover_top_target - self._menu_hover_top) * self.MENU_NODE_HOVER_LERP
+        self._menu_hover_bottom += (self._menu_hover_bottom_target - self._menu_hover_bottom) * self.MENU_NODE_HOVER_LERP
+
+        if abs(self._menu_hover_top - prev_top) > 0.001 or abs(self._menu_hover_bottom - prev_bottom) > 0.001:
+            self.update()
 
     def _build_gear_outline(self, node_center: QPointF, radius: float) -> QPainterPath:
         icon_radius = radius * self.MENU_ICON_BOX_RATIO * 0.5
@@ -897,12 +978,17 @@ class FloatingOrb(QWidget):
         self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
 
         if self._menu_interactions_blocked():
+            self._update_menu_hover_state()
             if self._magnet_offset != QPointF(0.0, 0.0):
                 self._magnet_offset = QPointF(0.0, 0.0)
             if self._cursor_proximity > 0.0:
                 self._cursor_proximity += (0.0 - self._cursor_proximity) * 0.25
             self.update()
             return
+
+        if self._menu_hover_top > 0.001 or self._menu_hover_bottom > 0.001:
+            self._menu_hover_top += (0.0 - self._menu_hover_top) * self.MENU_NODE_HOVER_LERP
+            self._menu_hover_bottom += (0.0 - self._menu_hover_bottom) * self.MENU_NODE_HOVER_LERP
 
         if self._pressing and not self._dragging:
             self.update()
