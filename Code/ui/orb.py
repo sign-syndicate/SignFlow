@@ -75,6 +75,7 @@ class FloatingOrb(QWidget):
         self._magnetic_effect_enabled = magnetic_effect_enabled
         self._scale = 1.0
         self._hover_progress = 0.0
+        self._inner_ring_progress = 0.0
         self._magnet_offset = QPointF(0.0, 0.0)
         self._dragging = False
         self._pressing = False
@@ -693,6 +694,7 @@ class FloatingOrb(QWidget):
         painter.drawLine(center, geometry["bottom"])
 
     def _draw_center_accent(self, painter: QPainter, center: QPointF, orb_radius: float):
+        interaction_boost = self._inner_ring_progress
         inner_rect = QRectF(
             center.x() - (orb_radius * 0.82),
             center.y() - (orb_radius * 0.82),
@@ -709,7 +711,11 @@ class FloatingOrb(QWidget):
         ring_pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(ring_pen)
         painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(inner_rect)
+
+        # Shrink the ring on hover to create a subtle pupil-dilation cue.
+        ring_shrink = orb_radius * (0.12 * interaction_boost)
+        ring_rect = inner_rect.adjusted(ring_shrink, ring_shrink, -ring_shrink, -ring_shrink)
+        painter.drawEllipse(ring_rect)
 
     def _draw_menu_nodes(self, painter: QPainter, center: QPointF, diameter: float):
         if self._menu_node_progress <= 0.001:
@@ -1057,6 +1063,9 @@ class FloatingOrb(QWidget):
 
     def _update_magnetic_offset(self):
         self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
+
+        ring_target = max(0.0, min(1.0, float(self._hover_progress)))
+        self._inner_ring_progress += (ring_target - self._inner_ring_progress) * 0.18
 
         if self._quitting:
             self.update()
