@@ -6,6 +6,7 @@ from PyQt5.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPoin
 from PyQt5.QtGui import QColor, QBrush, QCursor, QGuiApplication, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
+from ..core.constants import ORB_PRESENTATION_DEFAULTS, PANEL_DEFAULTS
 from ..core.theme import Theme
 from .panel import OrbPanelContent
 
@@ -103,7 +104,7 @@ class FloatingOrb(QWidget):
         self._cursor_proximity = 0.0
         self._click_flash = 0.0
         self._display_opacity = 1.0
-        self._dock_side = "right"
+        self._dock_side = ORB_PRESENTATION_DEFAULTS.edge_right
         self._dock_hidden = False
         self._menu_open = False
         self._menu_spine_progress = 0.0
@@ -119,12 +120,12 @@ class FloatingOrb(QWidget):
         self._menu_hover_top_target = 0.0
         self._menu_hover_bottom_target = 0.0
         self._settings_window = None
-        self._presentation_state = "orb"
+        self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_orb
         self._panel_morph = 0.0
         self._panel_anchor_edge_x = 0.0
         self._panel_anchor_center_y = 0.0
         self._panel_rect = QRectF()
-        self._panel_caption_text = "Listening..."
+        self._panel_caption_text = PANEL_DEFAULTS.caption_placeholder
         self._panel_restore_pos = QPoint()
         self._panel_restore_hidden = False
         self._hover_target_active = False
@@ -264,7 +265,10 @@ class FloatingOrb(QWidget):
     panelMorph = pyqtProperty(float, fget=getPanelMorph, fset=setPanelMorph)
 
     def orb_to_panel_transition(self):
-        if self._presentation_state in ("panel", "transition_to_panel"):
+        if self._presentation_state in (
+            ORB_PRESENTATION_DEFAULTS.state_panel,
+            ORB_PRESENTATION_DEFAULTS.state_transition_to_panel,
+        ):
             return
         if self._quitting or self._starting_up:
             return
@@ -289,12 +293,12 @@ class FloatingOrb(QWidget):
         center_global = self.mapToGlobal(self.rect().center())
         orb_radius = (self.BASE_DIAMETER * self._scale) * 0.5
         self._panel_anchor_center_y = float(center_global.y())
-        if self._dock_side == "right":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
             self._panel_anchor_edge_x = float(center_global.x()) + orb_radius
         else:
             self._panel_anchor_edge_x = float(center_global.x()) - orb_radius
 
-        self._presentation_state = "transition_to_panel"
+        self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_transition_to_panel
         self._panel_content.set_edge(self._dock_side)
         self._panel_content.show()
         self._panel_content.raise_()
@@ -305,12 +309,15 @@ class FloatingOrb(QWidget):
         self._panel_morph_animation.start()
 
     def panel_to_orb_transition(self):
-        if self._presentation_state in ("orb", "transition_to_orb"):
+        if self._presentation_state in (
+            ORB_PRESENTATION_DEFAULTS.state_orb,
+            ORB_PRESENTATION_DEFAULTS.state_transition_to_orb,
+        ):
             return
         if self._quitting:
             return
 
-        self._presentation_state = "transition_to_orb"
+        self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_transition_to_orb
         self._panel_morph_animation.stop()
         self._panel_morph_animation.setStartValue(self._panel_morph)
         self._panel_morph_animation.setEndValue(0.0)
@@ -319,7 +326,7 @@ class FloatingOrb(QWidget):
     def update_caption(self, text: str):
         safe_text = str(text).strip() if text is not None else ""
         if not safe_text:
-            safe_text = "Listening..."
+            safe_text = PANEL_DEFAULTS.caption_placeholder
         self._panel_caption_text = safe_text
         self._panel_content.animate_caption_update(self._panel_caption_text)
 
@@ -512,7 +519,7 @@ class FloatingOrb(QWidget):
         painter.drawRoundedRect(shadow_rect, panel_rect.height() * 0.5 + 8.0, panel_rect.height() * 0.5 + 8.0)
 
     def _panel_visual_active(self) -> bool:
-        return self._presentation_state != "orb" or self._panel_morph > 0.001
+        return self._presentation_state != ORB_PRESENTATION_DEFAULTS.state_orb or self._panel_morph > 0.001
 
     def _panel_width_phase(self) -> float:
         return max(0.0, min(1.0, self._panel_morph / 0.70))
@@ -539,7 +546,11 @@ class FloatingOrb(QWidget):
 
         width = max(2.0, self._panel_current_width())
         height = max(2.0, self._panel_current_height())
-        left = self._panel_anchor_edge_x - width if self._dock_side == "right" else self._panel_anchor_edge_x
+        left = (
+            self._panel_anchor_edge_x - width
+            if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right
+            else self._panel_anchor_edge_x
+        )
         top = self._panel_anchor_center_y - (height * 0.5)
 
         new_x = int(round(left))
@@ -703,8 +714,8 @@ class FloatingOrb(QWidget):
         return self._menu_open or self._menu_animating or self._menu_visual_active() or self._panel_visual_active()
 
     def _on_panel_morph_finished(self):
-        if self._presentation_state == "transition_to_panel":
-            self._presentation_state = "panel"
+        if self._presentation_state == ORB_PRESENTATION_DEFAULTS.state_transition_to_panel:
+            self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_panel
             self._hover_animation.stop()
             self.hoverProgress = 0.0
             self._cursor_proximity = 0.0
@@ -713,8 +724,8 @@ class FloatingOrb(QWidget):
             self.update()
             return
 
-        if self._presentation_state == "transition_to_orb":
-            self._presentation_state = "orb"
+        if self._presentation_state == ORB_PRESENTATION_DEFAULTS.state_transition_to_orb:
+            self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_orb
             self._panel_morph = 0.0
             self._panel_content.hide()
             self._restore_orb_canvas_geometry()
@@ -857,7 +868,7 @@ class FloatingOrb(QWidget):
         geometry = screen.availableGeometry()
         current = self.pos()
         margin = 12
-        if self._dock_side == "left":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
             target_x = geometry.left() - self.width() - margin
         else:
             target_x = geometry.right() + 1 + margin
@@ -923,7 +934,7 @@ class FloatingOrb(QWidget):
         self._set_hover_state(is_inside)
 
     def _menu_geometry(self, center: QPointF, diameter: float) -> dict:
-        direction_x = 1.0 if self._dock_side == "left" else -1.0
+        direction_x = 1.0 if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left else -1.0
         angle = math.radians(45.0)
         full_length = diameter * self.MENU_SPINE_RATIO
         length = full_length * self._menu_spine_progress
@@ -1140,14 +1151,14 @@ class FloatingOrb(QWidget):
 
         geometry = screen.availableGeometry()
         y = geometry.y() + (geometry.height() - self.height()) // 2
-        self._dock_side = "right"
+        self._dock_side = ORB_PRESENTATION_DEFAULTS.edge_right
         self._dock_hidden = False
         visible_position = self._dock_visible_target(screen)
         visible_position.setY(self._clamp_y(y, geometry))
 
         # Mirror the quit motion so launch feels intentional: enter from the dock edge while fading in.
         margin = int(self.STARTUP_ENTRY_MARGIN_PX)
-        if self._dock_side == "left":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
             start_x = geometry.left() - self.width() - margin
         else:
             start_x = geometry.right() + 1 + margin
@@ -1201,7 +1212,11 @@ class FloatingOrb(QWidget):
         current = self.pos()
         canvas_shift = (self.width() - self.DOCK_WIDGET_DIAMETER) / 2.0
         dock_center_x = current.x() + canvas_shift + (self.DOCK_WIDGET_DIAMETER / 2.0)
-        self._dock_side = "left" if dock_center_x < geometry.center().x() else "right"
+        self._dock_side = (
+            ORB_PRESENTATION_DEFAULTS.edge_left
+            if dock_center_x < geometry.center().x()
+            else ORB_PRESENTATION_DEFAULTS.edge_right
+        )
         target = self._dock_visible_target(screen)
         target.setY(self._clamp_y(current.y(), geometry))
 
@@ -1334,7 +1349,7 @@ class FloatingOrb(QWidget):
         y = self._clamp_y(self.pos().y(), geometry)
         overhang = int(self.VISIBLE_OVERHANG_PX)
         canvas_shift = int((self.width() - self.DOCK_WIDGET_DIAMETER) / 2)
-        if self._dock_side == "left":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
             x = geometry.left() - overhang - canvas_shift
         else:
             # right() is inclusive; add +1 to convert to width-style boundary before applying overhang.
@@ -1347,7 +1362,7 @@ class FloatingOrb(QWidget):
         visible_width = self._visible_width_for_hidden_state()
         canvas_shift = int((self.width() - self.DOCK_WIDGET_DIAMETER) / 2)
         x = self._docked_x_for_visible_width(geometry, visible_width)
-        x += canvas_shift if self._dock_side == "left" else -canvas_shift
+        x += canvas_shift if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left else -canvas_shift
         return QPoint(x, y)
 
     def _cursor_near_orb(self) -> bool:
@@ -1366,7 +1381,7 @@ class FloatingOrb(QWidget):
             return QPoint(self.pos().x() + self.width() // 2, center_y)
 
         visible_width = self._visible_width_for_hidden_state()
-        if self._dock_side == "left":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
             x = self.pos().x() + self.width() - visible_width // 2
         else:
             x = self.pos().x() + visible_width // 2
@@ -1377,7 +1392,7 @@ class FloatingOrb(QWidget):
 
     def _docked_x_for_visible_width(self, geometry, visible_width: int) -> int:
         visible_width = max(1, min(int(visible_width), self.width()))
-        if self._dock_side == "left":
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_left:
             return geometry.x() - (self.width() - visible_width)
         return geometry.x() + geometry.width() - visible_width
 
@@ -1467,7 +1482,7 @@ class FloatingOrb(QWidget):
 
             # Never allow magnetic motion to push the orb closer into its docked edge.
             if self._magnetic_effect_enabled:
-                if self._dock_side == "right":
+                if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
                     target.setX(min(0.0, target.x()))
                 else:
                     target.setX(max(0.0, target.x()))

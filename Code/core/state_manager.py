@@ -1,12 +1,14 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 
+from .constants import SELECTOR_DEFAULTS
+
 
 class AppStateManager(QObject):
     state_changed = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._state = "idle"
+        self._state = SELECTOR_DEFAULTS.state_idle
 
     @property
     def state(self) -> str:

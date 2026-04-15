@@ -2,6 +2,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import QAction, QMenu, QSystemTrayIcon
 
+from ..core.constants import TRAY_DEFAULTS
 from ..core.theme import Theme
 
 
@@ -13,10 +14,10 @@ def _draw_icon_pixmap(theme: Theme, size: int) -> QPixmap:
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-    margin = max(2, int(round(size * 0.16)))
+    margin = max(2, int(round(size * TRAY_DEFAULTS.margin_ratio)))
     diameter = size - (margin * 2)
-    border_width = max(1, int(round(size * 0.10)))
-    inner_margin = border_width + max(1, int(round(size * 0.04)))
+    border_width = max(1, int(round(size * TRAY_DEFAULTS.border_ratio)))
+    inner_margin = border_width + max(1, int(round(size * TRAY_DEFAULTS.inner_margin_ratio)))
 
     painter.setPen(Qt.NoPen)
     painter.setBrush(QColor(theme.tray_fill_color))
@@ -39,8 +40,8 @@ def _draw_icon_pixmap(theme: Theme, size: int) -> QPixmap:
         margin + inner_margin,
         diameter - (inner_margin * 2),
         diameter - (inner_margin * 2),
-        24 * 16,
-        64 * 16,
+        TRAY_DEFAULTS.arc_start_deg * 16,
+        TRAY_DEFAULTS.arc_span_deg * 16,
     )
 
     painter.end()
@@ -49,7 +50,7 @@ def _draw_icon_pixmap(theme: Theme, size: int) -> QPixmap:
 
 def build_tray_icon(theme: Theme) -> QIcon:
     icon = QIcon()
-    for size in (16, 20, 24, 32, 40, 48, 64):
+    for size in TRAY_DEFAULTS.icon_sizes_px:
         icon.addPixmap(_draw_icon_pixmap(theme, size))
     return icon
 

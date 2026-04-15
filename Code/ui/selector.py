@@ -13,6 +13,7 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PyQt5.QtWidgets import QWidget
 
+from ..core.constants import SELECTOR_DEFAULTS
 from ..core.theme import Theme, resolve_primary_light_color
 
 
@@ -20,20 +21,20 @@ class RoiSelectorOverlay(QWidget):
     roi_confirmed = pyqtSignal(int, int, int, int)
     selection_cancelled = pyqtSignal()
 
-    CONFIRMATION_MS = 3000
-    FADE_IN_MS = 180
-    COMPLETION_INSET_MS = 180
-    COMPLETION_FADE_MS = 180
-    CONFIRM_PADDING_PX = 4.0
-    INSTRUCTION_TEXT = "Select a region"
-    PRIME_HIDE_DELAY_MS = 48
+    CONFIRMATION_MS = SELECTOR_DEFAULTS.confirmation_ms
+    FADE_IN_MS = SELECTOR_DEFAULTS.fade_in_ms
+    COMPLETION_INSET_MS = SELECTOR_DEFAULTS.completion_inset_ms
+    COMPLETION_FADE_MS = SELECTOR_DEFAULTS.completion_fade_ms
+    CONFIRM_PADDING_PX = SELECTOR_DEFAULTS.confirm_padding_px
+    INSTRUCTION_TEXT = SELECTOR_DEFAULTS.instruction_text
+    PRIME_HIDE_DELAY_MS = SELECTOR_DEFAULTS.prime_hide_delay_ms
 
     def __init__(self, theme: Theme, debug: bool = False, parent=None):
         super().__init__(parent)
         self._theme = theme
         self._debug = debug
 
-        self._state = "idle"
+        self._state = SELECTOR_DEFAULTS.state_idle
         self._origin = None
         self._current = None
         self._roi_rect = QRect()
@@ -117,7 +118,7 @@ class RoiSelectorOverlay(QWidget):
         self._clear_roi()
         self._is_exiting = False
         self._emit_cancel_on_finish = False
-        self._set_state("idle")
+        self._set_state(SELECTOR_DEFAULTS.state_idle)
         self._fade_in_anim.stop()
         self.overlayOpacity = 0.0
         self.roiInset = 0.0
@@ -135,7 +136,7 @@ class RoiSelectorOverlay(QWidget):
         self._clear_roi()
         self._is_exiting = False
         self._emit_cancel_on_finish = False
-        self._set_state("idle")
+        self._set_state(SELECTOR_DEFAULTS.state_idle)
         self._fade_in_anim.stop()
         self._completion_inset_anim.stop()
         self._completion_fade_anim.stop()
@@ -175,7 +176,7 @@ class RoiSelectorOverlay(QWidget):
             event.ignore()
             return
 
-        if self._state == "confirming_roi":
+        if self._state == SELECTOR_DEFAULTS.state_confirming_roi:
             self._cancel_selection()
             event.accept()
             return
@@ -184,7 +185,7 @@ class RoiSelectorOverlay(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event):
-        if self._state != "selecting" or self._origin is None:
+        if self._state != SELECTOR_DEFAULTS.state_selecting or self._origin is None:
             event.ignore()
             return
 
@@ -198,7 +199,7 @@ class RoiSelectorOverlay(QWidget):
             event.ignore()
             return
 
-        if self._state != "selecting":
+        if self._state != SELECTOR_DEFAULTS.state_selecting:
             event.accept()
             return
 
@@ -240,7 +241,7 @@ class RoiSelectorOverlay(QWidget):
         if draw_rect.width() <= 0 or draw_rect.height() <= 0:
             return
 
-        if self._state == "confirming_roi":
+        if self._state == SELECTOR_DEFAULTS.state_confirming_roi:
             inner_pen = QPen(self._primary_light_color, 1.9)
             inner_pen.setStyle(Qt.CustomDashLine)
             inner_pen.setDashPattern([6.0, 5.0])
@@ -310,13 +311,13 @@ class RoiSelectorOverlay(QWidget):
         self._current = point
         self._roi_rect = QRect(point, point)
 
-        self._set_state("selecting")
+        self._set_state(SELECTOR_DEFAULTS.state_selecting)
         self.update()
 
     def _enter_confirmation(self):
         self._confirm_animation.stop()
         self.confirmProgress = 0.0
-        self._set_state("confirming_roi")
+        self._set_state(SELECTOR_DEFAULTS.state_confirming_roi)
         self._confirm_animation.setStartValue(0.0)
         self._confirm_animation.setEndValue(1.0)
         self._confirm_animation.start()
@@ -327,7 +328,7 @@ class RoiSelectorOverlay(QWidget):
 
         self._confirm_animation.stop()
         self.confirmProgress = 1.0
-        self._set_state("confirming_roi")
+        self._set_state(SELECTOR_DEFAULTS.state_confirming_roi)
         self._on_confirmation_complete()
 
     def _handle_key_action(self, key: int) -> bool:
@@ -342,7 +343,7 @@ class RoiSelectorOverlay(QWidget):
         return True
 
     def _on_confirmation_complete(self):
-        if self._state != "confirming_roi" or not self._is_valid_rect(self._roi_rect):
+        if self._state != SELECTOR_DEFAULTS.state_confirming_roi or not self._is_valid_rect(self._roi_rect):
             return
         self._start_exit_animation(confirm=True)
 
@@ -355,7 +356,7 @@ class RoiSelectorOverlay(QWidget):
         if self._emit_cancel_on_finish:
             self._emit_cancel_on_finish = False
             self._clear_roi()
-            self._set_state("idle")
+            self._set_state(SELECTOR_DEFAULTS.state_idle)
             self.selection_cancelled.emit()
             self.close()
             return
@@ -368,7 +369,7 @@ class RoiSelectorOverlay(QWidget):
                 self._locked_rect.height(),
             )
         self._clear_roi()
-        self._set_state("idle")
+        self._set_state(SELECTOR_DEFAULTS.state_idle)
         self.close()
 
     def _cancel_selection(self):
@@ -387,10 +388,11 @@ class RoiSelectorOverlay(QWidget):
         if confirm and self._is_valid_rect(self._roi_rect):
             self._emit_cancel_on_finish = False
             self._locked_rect = QRect(self._roi_rect)
-            print(
-                f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
-                f"{self._locked_rect.width()}, {self._locked_rect.height()}"
-            )
+            if self._debug:
+                print(
+                    f"ROI confirmed: {self._locked_rect.x()}, {self._locked_rect.y()}, "
+                    f"{self._locked_rect.width()}, {self._locked_rect.height()}"
+                )
         else:
             self._emit_cancel_on_finish = True
             self._locked_rect = QRect()
@@ -414,7 +416,14 @@ class RoiSelectorOverlay(QWidget):
     def _set_fullscreen_geometry(self):
         screens = QGuiApplication.screens()
         if not screens:
-            self.setGeometry(QRect(0, 0, 1280, 720))
+            self.setGeometry(
+                QRect(
+                    0,
+                    0,
+                    SELECTOR_DEFAULTS.fallback_screen_width,
+                    SELECTOR_DEFAULTS.fallback_screen_height,
+                )
+            )
             return
 
         geometry = screens[0].geometry()
@@ -443,7 +452,7 @@ class RoiSelectorOverlay(QWidget):
 
     @staticmethod
     def _is_valid_rect(rect: QRect) -> bool:
-        return rect.width() >= 4 and rect.height() >= 4
+        return rect.width() >= SELECTOR_DEFAULTS.min_valid_side_px and rect.height() >= SELECTOR_DEFAULTS.min_valid_side_px
 
     @staticmethod
     def _rect_perimeter_points(rect: QRect):

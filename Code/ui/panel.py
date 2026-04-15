@@ -4,6 +4,7 @@ from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import QGraphicsOpacityEffect, QLabel, QPushButton, QWidget
 
+from ..core.constants import ORB_PRESENTATION_DEFAULTS, PANEL_DEFAULTS
 from ..core.theme import Theme
 
 
@@ -13,12 +14,12 @@ class OrbPanelContent(QWidget):
     def __init__(self, theme: Theme, parent=None):
         super().__init__(parent)
         self._theme = theme
-        self._edge = "right"
+        self._edge = ORB_PRESENTATION_DEFAULTS.edge_right
         self._morph = 0.0
         self._radius = 14.0
         self._padding = 14
 
-        self._caption_label = QLabel("Listening...", self)
+        self._caption_label = QLabel(PANEL_DEFAULTS.caption_placeholder, self)
         self._caption_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
         self._caption_opacity = QGraphicsOpacityEffect(self._caption_label)
@@ -26,19 +27,19 @@ class OrbPanelContent(QWidget):
         self._caption_label.setGraphicsEffect(self._caption_opacity)
 
         self._caption_anim = QPropertyAnimation(self._caption_opacity, b"opacity", self)
-        self._caption_anim.setDuration(100)
+        self._caption_anim.setDuration(PANEL_DEFAULTS.caption_update_ms)
         self._caption_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._collapse_button = QPushButton("X", self)
         self._collapse_button.setFocusPolicy(Qt.NoFocus)
         self._collapse_button.setCursor(Qt.PointingHandCursor)
-        self._collapse_button.setFixedSize(24, 24)
+        self._collapse_button.setFixedSize(PANEL_DEFAULTS.collapse_button_size_px, PANEL_DEFAULTS.collapse_button_size_px)
         self._collapse_button.clicked.connect(self.collapse_requested.emit)
 
         self._apply_theme()
 
     def set_edge(self, edge: str):
-        edge = "left" if str(edge).lower() == "left" else "right"
+        edge = ORB_PRESENTATION_DEFAULTS.edge_left if str(edge).lower() == ORB_PRESENTATION_DEFAULTS.edge_left else ORB_PRESENTATION_DEFAULTS.edge_right
         if edge == self._edge:
             return
         self._edge = edge
@@ -62,7 +63,7 @@ class OrbPanelContent(QWidget):
     def set_caption(self, text: str):
         safe_text = str(text).strip() if text is not None else ""
         if not safe_text:
-            safe_text = "Listening..."
+            safe_text = PANEL_DEFAULTS.caption_placeholder
         self._caption_label.setText(safe_text)
 
     def animate_caption_update(self, text: str):
@@ -114,8 +115,8 @@ class OrbPanelContent(QWidget):
 
         self._caption_label.setStyleSheet(
             "color: " + caption_color + ";"
-            "font-size: 16px;"
-            "font-weight: 600;"
+            "font-size: " + str(PANEL_DEFAULTS.caption_font_px) + "px;"
+            "font-weight: " + str(PANEL_DEFAULTS.caption_weight) + ";"
             "background: transparent;"
             "border: none;"
         )
@@ -123,8 +124,8 @@ class OrbPanelContent(QWidget):
         self._collapse_button.setStyleSheet(
             "QPushButton {"
             "color: " + btn_color + ";"
-            "font-size: 12px;"
-            "font-weight: 700;"
+            "font-size: " + str(PANEL_DEFAULTS.collapse_button_font_px) + "px;"
+            "font-weight: " + str(PANEL_DEFAULTS.collapse_button_weight) + ";"
             "background: " + btn_bg + ";"
             "border: 1px solid " + btn_border + ";"
             "border-radius: 12px;"
@@ -148,14 +149,14 @@ class OrbPanelContent(QWidget):
         button_size = self._collapse_button.width()
         button_y = max(0, (panel_h - button_size) // 2)
 
-        if self._edge == "right":
+        if self._edge == ORB_PRESENTATION_DEFAULTS.edge_right:
             button_x = max(0, panel_w - padding - button_size)
             caption_left = max(0, padding)
-            caption_right = max(caption_left + 120, button_x - 8)
+            caption_right = max(caption_left + PANEL_DEFAULTS.min_caption_width_px, button_x - PANEL_DEFAULTS.caption_button_gap_px)
         else:
             button_x = max(0, padding)
-            caption_left = min(panel_w, button_x + button_size + 8)
-            caption_right = max(caption_left + 120, panel_w - padding)
+            caption_left = min(panel_w, button_x + button_size + PANEL_DEFAULTS.caption_button_gap_px)
+            caption_right = max(caption_left + PANEL_DEFAULTS.min_caption_width_px, panel_w - padding)
 
         self._collapse_button.move(button_x, button_y)
 

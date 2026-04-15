@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 
+from .constants import APP_DEFAULTS
 
-APP_NAME = "SignFlow"
-CURRENT_THEME = "APPLE"
-DEBUG = False
-ORB_MAGNETIC_EFFECT_ENABLED = False
+
+APP_NAME = APP_DEFAULTS.name
+CURRENT_THEME = APP_DEFAULTS.theme
+DEBUG = APP_DEFAULTS.debug
+ORB_MAGNETIC_EFFECT_ENABLED = APP_DEFAULTS.orb_magnetic_effect_enabled
 
 
 @dataclass(frozen=True)

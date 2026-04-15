@@ -4,6 +4,7 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
 
 from .core.config import AppConfig
+from .core.constants import RUNTIME_TIMING
 from .core.theme import get_theme
 from .ui.orb import FloatingOrb
 from .ui.selector import RoiSelectorOverlay
@@ -51,14 +52,14 @@ def main():
             return
 
         overlay = _get_or_create_overlay()
-        QTimer.singleShot(0, overlay.start)
+        QTimer.singleShot(RUNTIME_TIMING.next_tick_ms, overlay.start)
 
     orb.activated.connect(_open_selector_overlay)
     orb.show()
 
     # Pre-warm the fullscreen translucent ROI overlay once so first open is instant.
     warm_overlay = _get_or_create_overlay()
-    QTimer.singleShot(0, warm_overlay.prime)
+    QTimer.singleShot(RUNTIME_TIMING.next_tick_ms, warm_overlay.prime)
 
     app._signflow_orb = orb
     app._signflow_tray = tray

@@ -1,6 +1,6 @@
 # SignFlow
 
-Minimal desktop shell built with PyQt5.
+SignFlow is a PyQt5 desktop shell with a floating orb, ROI capture overlay, and panel morph interaction.
 
 ## Quick Start
 
@@ -9,63 +9,67 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## What It Does
+## Product Surface
 
-SignFlow starts as a static-theme tray app with one floating orb and a full-screen ROI selector:
+- Floating orb with dock/snap, hover motion, and idle edge hide/reveal
+- ROI selector overlay with instant fade-in, confirmation animation, and cancel/confirm paths
+- Orb to panel morph with reversible close, caption placeholder, and edge-aware layout
+- System tray process shell with Exit action
 
-- System tray icon with an Exit action only
-- Floating orb anchored to a stable edge distance
-- Subtle breathing, hover, magnetic, and snap motion
-- Idle auto-hide with partial edge docking and smooth reveal
-- Hidden-state translucency with animated fade during dock transitions
-- Full-screen ROI selection overlay with animated confirmation
-- Static theme selection at startup only
+## Refactor Highlights
 
-## Architecture
+- Centralized shared constants in [Code/core/constants.py](Code/core/constants.py)
+- Runtime config stays in [Code/core/config.py](Code/core/config.py), sourced from shared defaults
+- Panel UI extracted into [Code/ui/panel.py](Code/ui/panel.py)
+- Selector and tray now consume shared tokens (timings, states, sizes) instead of scattered literals
+- Overlay warm-up persists and is pre-primed at startup for first-open responsiveness
+
+## Project Layout
 
 ```
 Code/
 ├── core/
-│   ├── config.py         # App constants and static theme choice
-│   ├── theme.py          # Theme definitions and resolver
-│   └── state_manager.py  # Minimal state holder
+│   ├── __init__.py
+│   ├── config.py
+│   ├── constants.py
+│   ├── state_manager.py
+│   └── theme.py
 ├── ui/
-│   ├── orb.py            # Floating orb widget
-│   ├── selector.py       # Full-screen ROI selector overlay
-│   └── tray.py           # System tray controller
-└── main.py              # PyQt5 entry point
+│   ├── __init__.py
+│   ├── orb.py
+│   ├── panel.py
+│   ├── selector.py
+│   └── tray.py
+└── main.py
 
 Documents/
 └── architecture.md
 ```
 
-## Current Behavior
+## Runtime Flow
 
-1. Launches QApplication.
-2. Resolves the configured theme once at startup.
-3. Creates a QSystemTrayIcon with only Exit in the menu.
-4. Creates and primes the ROI selector once (warm-up) so first-entry transition is smoother.
-5. Shows a draggable floating orb with stable edge attachment and consistent snap distance.
-6. Auto-hides the orb after idle by docking it partially into the attached edge.
-7. Reveals the orb when cursor enters the activation region, even when magnetic pull is disabled.
-8. Clicking the orb opens ROI mode with a dimmed full-screen overlay and a fade-in transition.
-9. Dragging defines a selection rectangle; release starts a 3-second confirmation animation.
-10. Enter/Space can skip the confirmation timer and finalize immediately.
-11. Cancel paths (ESC, right-click, or non-drag click in ROI) use animated fade-out and emit cancellation.
-12. Confirm path emits ROI coordinates and exits with the same polished fade-out timing.
-13. Keeps the app alive in the tray until Exit.
-
-The orb's cursor-driven magnetic motion is controlled by `Code/core/config.py` via `ORB_MAGNETIC_EFFECT_ENABLED`, and is currently disabled. Hover, click, scale, and cursor-proximity reveal still remain active.
+1. Start QApplication and resolve theme.
+2. Build tray icon/controller.
+3. Build floating orb.
+4. Create one persistent ROI overlay instance.
+5. Prime overlay once on startup to avoid first-open hitch.
+6. On orb activation, open overlay with immediate fade-in.
+7. On ROI confirm, emit coordinates and transition orb to panel mode.
+8. On panel close, reverse morph back to orb and restore dock behavior.
 
 ## ROI Controls
 
-- Left click + drag: select region.
-- Release after drag: begin confirmation timer.
-- Enter or Space: confirm immediately (skip timer).
-- ESC: cancel selection.
-- Right click: cancel selection.
-- Left click without a valid drag: cancel and exit ROI.
+- Left drag: draw selection rectangle
+- Release: start confirmation countdown
+- Enter/Space: immediate confirm
+- Escape or right click: cancel
+
+## Stability Notes
+
+- State names and timing values are centralized and reused across modules.
+- Widget creation paths avoid repeated heavyweight overlay construction.
+- Behavior-preserving refactor focused on structure and maintainability, not feature changes.
 
 ## License
 
-See the LICENSE file.
+See [LICENSE](LICENSE).
