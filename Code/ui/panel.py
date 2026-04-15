@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 
-from PyQt5.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter, QPen
+from PyQt5.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QLinearGradient, QPainter, QPen, QRadialGradient
 from PyQt5.QtCore import QRectF
 from PyQt5.QtWidgets import QGraphicsOpacityEffect, QLabel, QWidget
 
@@ -113,17 +113,11 @@ class OrbPanelContent(QWidget):
         if self._theme.name == "APPLE":
             fill = QColor(255, 255, 255, 250)
             border = QColor(24, 24, 24, 120)
-            orb_fill = QColor(255, 255, 255, 252)
-            orb_border = QColor(24, 24, 24, 120)
         else:
             fill = QColor(self._theme.base_color)
             fill.setAlpha(236)
             border = QColor(self._theme.primary_color)
             border.setAlpha(96)
-            orb_fill = QColor(self._theme.base_color)
-            orb_fill.setAlpha(246)
-            orb_border = QColor(self._theme.primary_color)
-            orb_border.setAlpha(110)
 
         painter.setBrush(fill)
         pen = QPen(border, 1.0)
@@ -134,17 +128,7 @@ class OrbPanelContent(QWidget):
 
         orb_rect = self._compute_anchor_orb_rect()
         self._anchor_orb_rect = orb_rect
-        shadow = QColor(0, 0, 0, PANEL_DEFAULTS.anchor_orb_shadow_alpha)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(shadow)
-        painter.drawEllipse(orb_rect.adjusted(1.0, 1.0, 3.0, 3.0))
-
-        orb_pen = QPen(orb_border, PANEL_DEFAULTS.anchor_orb_border_px)
-        orb_pen.setCapStyle(Qt.RoundCap)
-        orb_pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(orb_pen)
-        painter.setBrush(orb_fill)
-        painter.drawEllipse(orb_rect)
+        self._draw_anchor_orb(painter, orb_rect)
 
     def _apply_theme(self):
         if self._theme.name == "APPLE":
@@ -192,6 +176,86 @@ class OrbPanelContent(QWidget):
         else:
             center_x = float(PANEL_DEFAULTS.edge_overhang_px)
         return QRectF(center_x - radius, center_y - radius, diameter, diameter)
+
+    def _draw_anchor_orb(self, painter: QPainter, orb_rect: QRectF):
+        center = orb_rect.center()
+        radius = orb_rect.width() * 0.5
+
+        glow_color = QColor(self._theme.glow_color)
+        glow_color.setAlphaF(0.22 + (self._theme.shadow_strength * 0.22))
+        glow = QRadialGradient(center, radius * 1.48)
+        glow.setColorAt(0.0, glow_color)
+        glow_soft = QColor(glow_color)
+        glow_soft.setAlphaF(glow_color.alphaF() * 0.22)
+        glow.setColorAt(0.70, glow_soft)
+        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(orb_rect.adjusted(-radius * 0.44, -radius * 0.44, radius * 0.44, radius * 0.44))
+
+        fill_gradient = QRadialGradient(orb_rect.topLeft() + QPointF(radius * 0.28, radius * 0.24), radius * 1.2)
+        highlight = QColor(self._theme.hover_color)
+        highlight.setAlphaF(0.96 if self._theme.name == "APPLE" else 0.52)
+        base = QColor(self._theme.base_color)
+        base_darker = QColor(self._theme.base_color).darker(112 if self._theme.name == "APPLE" else 128)
+        fill_gradient.setColorAt(0.0, highlight)
+        fill_gradient.setColorAt(0.5, base)
+        fill_gradient.setColorAt(1.0, base_darker)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill_gradient)
+        painter.drawEllipse(orb_rect)
+
+        sheen = QLinearGradient(orb_rect.topLeft(), orb_rect.bottomRight())
+        sheen_color = QColor(255, 255, 255, 36 if self._theme.name == "APPLE" else 14)
+        sheen.setColorAt(0.0, sheen_color)
+        sheen.setColorAt(0.4, QColor(255, 255, 255, 0))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(sheen)
+        painter.drawEllipse(orb_rect.adjusted(radius * 0.08, radius * 0.08, -radius * 0.12, -radius * 0.12))
+
+        border_rect = orb_rect.adjusted(-4.2, -4.2, 4.2, 4.2)
+        ring_width = 2.3 if self._theme.name == "APPLE" else 2.05
+        segment_span = 13.0
+        slots = 8
+        phase = 0.0
+        if self._theme.name == "APPLE":
+            border_color = QColor(221, 221, 221, 232)
+        else:
+            border_color = QColor(self._theme.glow_color)
+            border_color.setAlpha(236)
+
+        for index in range(slots):
+            angle = (phase + index * (360.0 / slots)) % 360.0
+            color = QColor(border_color)
+            pen = QPen(color, ring_width)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawArc(border_rect, int((90.0 - (angle + segment_span * 0.5)) * 16), int(segment_span * 16))
+
+        inner_rim_alpha = 50 if self._theme.name == "APPLE" else 24
+        inner_rim = QPen(QColor(255, 255, 255, inner_rim_alpha))
+        inner_rim.setWidthF(0.8)
+        painter.setPen(inner_rim)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(orb_rect.adjusted(4.0, 4.0, -4.0, -4.0))
+
+        inner_rect = QRectF(
+            center.x() - (radius * 0.82),
+            center.y() - (radius * 0.82),
+            radius * 1.64,
+            radius * 1.64,
+        )
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#F7F7F7"))
+        painter.drawEllipse(inner_rect)
+
+        ring_pen = QPen(QColor("#2A2A2F"), 2.5)
+        ring_pen.setCapStyle(Qt.RoundCap)
+        ring_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(ring_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(inner_rect)
 
     def _is_on_anchor_orb(self, point) -> bool:
         if self._anchor_orb_rect is None:

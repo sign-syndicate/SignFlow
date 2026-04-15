@@ -298,7 +298,11 @@ class FloatingOrb(QWidget):
         if screen is None:
             return
 
-        self._panel_anchor_center_y = float(center_global.y())
+        geometry = screen.availableGeometry()
+        min_panel_y = geometry.top()
+        max_panel_y = max(min_panel_y, (geometry.bottom() + 1) - self.WIDGET_DIAMETER)
+        panel_y = max(min_panel_y, min(int(round(center_global.y() - (self.PANEL_TARGET_HEIGHT * 0.5))), max_panel_y))
+        self._panel_anchor_center_y = float(panel_y + (self.PANEL_TARGET_HEIGHT * 0.5))
         panel_overhang = float(PANEL_DEFAULTS.edge_overhang_px)
         if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
             self._panel_anchor_edge_x = float(center_global.x()) + panel_overhang
@@ -627,7 +631,9 @@ class FloatingOrb(QWidget):
         min_x = geometry.left() - overhang
         max_x = (geometry.right() + 1) - self.width() + overhang
         x = max(min_x, min(position.x(), max_x))
-        y = self._clamp_y(position.y(), geometry)
+        min_y = geometry.top()
+        max_y = max(min_y, (geometry.bottom() + 1) - self.WIDGET_DIAMETER)
+        y = max(min_y, min(position.y(), max_y))
         return QPoint(x, y)
 
     def _snap_panel_to_nearest_edge(self, global_pos: QPoint):
@@ -652,7 +658,9 @@ class FloatingOrb(QWidget):
             target_x = (geometry.right() + 1) - self.width() + overhang
             self._panel_anchor_edge_x = float(geometry.right() + 1) + float(overhang)
 
-        target_y = self._clamp_y(self.y(), geometry)
+        min_y = geometry.top()
+        max_y = max(min_y, (geometry.bottom() + 1) - self.WIDGET_DIAMETER)
+        target_y = max(min_y, min(self.y(), max_y))
         self._panel_anchor_center_y = float(target_y + (self.height() * 0.5))
         self._animate_to_position(QPoint(target_x, target_y), self.DOCK_ANIMATION_MS, QEasingCurve.OutCubic, use_snap_animation=True)
 
