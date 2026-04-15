@@ -32,6 +32,7 @@ def main():
     def _on_roi_confirmed(x: int, y: int, w: int, h: int):
         if config.debug:
             print(f"stored roi: {x}, {y}, {w}, {h}")
+        orb.on_roi_confirmed(x, y, w, h)
         selector["widget"] = None
 
     def _get_or_create_overlay():
