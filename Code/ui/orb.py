@@ -63,6 +63,9 @@ class FloatingOrb(QWidget):
     MENU_ICON_STROKE_RATIO = 0.16
     MENU_NODE_HOVER_SCALE = 0.08
     MENU_NODE_HOVER_LERP = 0.24
+    QUIT_EXIT_MS = 190
+    QUIT_EXIT_DROP_PX = 8
+    QUIT_EXIT_OPACITY = 0.74
 
     def __init__(self, theme: Theme, debug: bool = False, magnetic_effect_enabled: bool = True, parent=None):
         super().__init__(parent)
@@ -82,6 +85,7 @@ class FloatingOrb(QWidget):
         self._snap_animation = None
         self._dock_animation = None
         self._opacity_animation = None
+        self._quit_move_animation = None
         self._border_phase = 0.0
         self._cursor_proximity = 0.0
         self._click_flash = 0.0
@@ -94,6 +98,8 @@ class FloatingOrb(QWidget):
         self._menu_animating = False
         self._menu_animating_open = False
         self._menu_mouse_grabbed = False
+        self._pending_quit = False
+        self._quitting = False
         self._menu_hover_top = 0.0
         self._menu_hover_bottom = 0.0
         self._menu_hover_top_target = 0.0
@@ -223,6 +229,7 @@ class FloatingOrb(QWidget):
             print(f"orb position: {self.pos().x()}, {self.pos().y()}")
 
     def closeEvent(self, event):
+        self._stop_quit_move_animation()
         self._release_menu_mouse_grab()
         self._remove_global_click_filter()
         self._menu_spine_animation.stop()
@@ -236,6 +243,9 @@ class FloatingOrb(QWidget):
         super().closeEvent(event)
 
     def enterEvent(self, event):
+        if self._quitting:
+            super().enterEvent(event)
+            return
         if self._menu_interactions_blocked():
             super().enterEvent(event)
             return
@@ -245,6 +255,9 @@ class FloatingOrb(QWidget):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
+        if self._quitting:
+            super().leaveEvent(event)
+            return
         if self._menu_interactions_blocked():
             super().leaveEvent(event)
             return
@@ -355,6 +368,10 @@ class FloatingOrb(QWidget):
             painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
     def mousePressEvent(self, event):
+        if self._quitting:
+            event.accept()
+            return
+
         if event.button() == Qt.RightButton:
             if self._menu_interactions_blocked():
                 self._close_menu()
@@ -377,7 +394,7 @@ class FloatingOrb(QWidget):
                 self._open_settings_window()
                 self._close_menu()
             elif action == "quit":
-                QApplication.quit()
+                self._request_quit_sequence()
             else:
                 self._close_menu()
             event.accept()
@@ -501,7 +518,7 @@ class FloatingOrb(QWidget):
         return False
 
     def _can_open_menu(self) -> bool:
-        return not self._dragging and not self._pressing and not self._is_roi_active()
+        return not self._quitting and not self._dragging and not self._pressing and not self._is_roi_active()
 
     def _open_menu(self):
         if self._menu_open and not self._menu_animating:
@@ -543,7 +560,53 @@ class FloatingOrb(QWidget):
         self._menu_node_animation.setEndValue(0.0)
         self._menu_node_animation.start()
 
+    def _request_quit_sequence(self):
+        if self._quitting:
+            return
+        self._pending_quit = True
+        if self._menu_interactions_blocked():
+            self._close_menu()
+            return
+        self._start_quit_exit_animation()
+
+    def _start_quit_exit_animation(self):
+        if self._quitting:
+            return
+
+        self._pending_quit = False
+        self._quitting = True
+        self._remove_global_click_filter()
+        self._cancel_idle_timer()
+        self._stop_snap_animation()
+        self._stop_dock_animation()
+        self._stop_quit_move_animation()
+
+        screen = self._screen_for_point(self._orb_center_point())
+        if screen is None:
+            QApplication.quit()
+            return
+
+        geometry = screen.availableGeometry()
+        current = self.pos()
+        margin = 12
+        if self._dock_side == "left":
+            target_x = geometry.left() - self.width() - margin
+        else:
+            target_x = geometry.right() + 1 + margin
+        target_y = self._clamp_y(current.y() + self.QUIT_EXIT_DROP_PX, geometry)
+
+        self._quit_move_animation = QPropertyAnimation(self, b"pos", self)
+        self._quit_move_animation.setDuration(self.QUIT_EXIT_MS)
+        self._quit_move_animation.setEasingCurve(QEasingCurve.InCubic)
+        self._quit_move_animation.setStartValue(current)
+        self._quit_move_animation.setEndValue(QPoint(target_x, target_y))
+        self._quit_move_animation.finished.connect(self._on_quit_exit_animation_finished)
+        self._quit_move_animation.start()
+        self._animate_display_opacity(self.QUIT_EXIT_OPACITY, duration=self.QUIT_EXIT_MS)
+
     def _on_application_state_changed(self, state):
+        if self._quitting:
+            return
         if state != Qt.ApplicationActive and self._menu_interactions_blocked():
             self._close_menu()
 
@@ -558,6 +621,9 @@ class FloatingOrb(QWidget):
         self._menu_animating = False
         self._menu_animating_open = False
         self._remove_global_click_filter()
+        if self._pending_quit:
+            self._start_quit_exit_animation()
+            return
         self._sync_hover_after_menu_close()
         self._reset_idle_timer()
 
@@ -572,6 +638,16 @@ class FloatingOrb(QWidget):
         self._menu_spine_animation.setStartValue(self._menu_spine_progress)
         self._menu_spine_animation.setEndValue(0.0)
         self._menu_spine_animation.start()
+
+    def _stop_quit_move_animation(self):
+        if self._quit_move_animation is not None:
+            self._quit_move_animation.stop()
+            self._quit_move_animation.deleteLater()
+            self._quit_move_animation = None
+
+    def _on_quit_exit_animation_finished(self):
+        self._stop_quit_move_animation()
+        QApplication.quit()
 
     def _sync_hover_after_menu_close(self):
         local_cursor = self.mapFromGlobal(QCursor.pos())
@@ -976,6 +1052,10 @@ class FloatingOrb(QWidget):
 
     def _update_magnetic_offset(self):
         self._border_phase = (self._border_phase + 0.42 + (self._cursor_proximity * 0.18)) % 360.0
+
+        if self._quitting:
+            self.update()
+            return
 
         if self._menu_interactions_blocked():
             self._update_menu_hover_state()
