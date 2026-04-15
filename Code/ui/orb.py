@@ -883,7 +883,9 @@ class FloatingOrb(QWidget):
 
         geometry = screen.availableGeometry()
         current = self.pos()
-        self._dock_side = "left" if current.x() + (self.width() / 2.0) < geometry.center().x() else "right"
+        canvas_shift = (self.width() - self.DOCK_WIDGET_DIAMETER) / 2.0
+        dock_center_x = current.x() + canvas_shift + (self.DOCK_WIDGET_DIAMETER / 2.0)
+        self._dock_side = "left" if dock_center_x < geometry.center().x() else "right"
         target = self._dock_visible_target(screen)
         target.setY(self._clamp_y(current.y(), geometry))
 
@@ -1159,7 +1161,10 @@ class FloatingOrb(QWidget):
 
     def _clamp_to_screen(self, position: QPoint, screen) -> QPoint:
         geometry = screen.availableGeometry()
-        x = max(geometry.x(), min(position.x(), geometry.x() + geometry.width() - self.width()))
+        canvas_shift = int((self.width() - self.DOCK_WIDGET_DIAMETER) / 2)
+        min_x = geometry.left() - int(self.VISIBLE_OVERHANG_PX) - canvas_shift
+        max_x = geometry.right() - self.DOCK_WIDGET_DIAMETER + 1 + int(self.VISIBLE_OVERHANG_PX) - canvas_shift
+        x = max(min_x, min(position.x(), max_x))
         y = self._clamp_y(position.y(), geometry)
         return QPoint(x, y)
 
