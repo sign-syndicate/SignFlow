@@ -61,6 +61,7 @@ class FloatingOrb(QWidget):
     MENU_NODE_RATIO = 0.75
     MENU_ICON_BOX_RATIO = 1.24
     MENU_ICON_STROKE_RATIO = 0.16
+    MENU_COMMON_STROKE_WIDTH = 2.5
     MENU_NODE_HOVER_SCALE = 0.08
     MENU_NODE_HOVER_LERP = 0.24
     QUIT_EXIT_MS = 190
@@ -356,6 +357,8 @@ class FloatingOrb(QWidget):
         painter.setPen(inner_rim)
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(orb_rect.adjusted(4.0, 4.0, -4.0, -4.0))
+
+        self._draw_center_accent(painter, center, radius)
 
         if menu_visible:
             self._draw_menu_nodes(painter, center, diameter)
@@ -689,6 +692,25 @@ class FloatingOrb(QWidget):
         painter.drawLine(center, geometry["top"])
         painter.drawLine(center, geometry["bottom"])
 
+    def _draw_center_accent(self, painter: QPainter, center: QPointF, orb_radius: float):
+        inner_rect = QRectF(
+            center.x() - (orb_radius * 0.82),
+            center.y() - (orb_radius * 0.82),
+            orb_radius * 1.64,
+            orb_radius * 1.64,
+        )
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#F7F7F7"))
+        painter.drawEllipse(inner_rect)
+
+        ring_pen = QPen(self._menu_icon_color("settings"), self.MENU_COMMON_STROKE_WIDTH)
+        ring_pen.setCapStyle(Qt.RoundCap)
+        ring_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(ring_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(inner_rect)
+
     def _draw_menu_nodes(self, painter: QPainter, center: QPointF, diameter: float):
         if self._menu_node_progress <= 0.001:
             return
@@ -707,39 +729,22 @@ class FloatingOrb(QWidget):
         self._draw_quit_icon(painter, geometry["bottom"], node_radius * bottom_scale)
 
     def _draw_mini_orb(self, painter: QPainter, node_center: QPointF, radius: float, hover_amount: float = 0.0):
-        base_color = QColor(self._theme.base_color)
-        darker = QColor(self._theme.base_color).darker(122)
-        highlight = QColor(self._theme.hover_color)
-        highlight.setAlpha(int(168 + (40 * hover_amount)))
-
-        gradient = QRadialGradient(node_center + QPointF(radius * 0.22, -radius * 0.20), radius * 1.15)
-        gradient.setColorAt(0.0, highlight)
-        gradient.setColorAt(0.45, base_color)
-        gradient.setColorAt(1.0, darker)
-
-        glow = QColor(self._theme.primary_color)
-        glow.setAlpha(int((84 + (58 * hover_amount)) * self._menu_node_progress))
-        glow_gradient = QRadialGradient(node_center, radius * 1.45)
-        glow_gradient.setColorAt(0.0, glow)
-        glow_gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-
         rect = QRectF(node_center.x() - radius, node_center.y() - radius, radius * 2.0, radius * 2.0)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(glow_gradient)
-        painter.drawEllipse(rect.adjusted(-radius * 0.35, -radius * 0.35, radius * 0.35, radius * 0.35))
-
-        painter.setBrush(gradient)
+        painter.setBrush(QColor(self._theme.base_color))
         painter.drawEllipse(rect)
 
-        rim = QPen(QColor(255, 255, 255, 46), 0.9)
-        painter.setPen(rim)
+        border = QPen(QColor(255, 255, 255, 38), 0.8)
+        border.setCapStyle(Qt.RoundCap)
+        border.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(border)
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(rect.adjusted(2.0, 2.0, -2.0, -2.0))
 
     def _draw_settings_icon(self, painter: QPainter, node_center: QPointF, radius: float):
-        color = self._menu_icon_color()
+        color = self._menu_icon_color("settings")
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.1, radius * self.MENU_ICON_STROKE_RATIO))
+        pen = QPen(color, self.MENU_COMMON_STROKE_WIDTH)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -758,9 +763,9 @@ class FloatingOrb(QWidget):
         )
 
     def _draw_quit_icon(self, painter: QPainter, node_center: QPointF, radius: float):
-        color = self._menu_icon_color()
+        color = self._menu_icon_color("quit")
         color.setAlpha(int(255 * self._menu_node_progress))
-        pen = QPen(color, max(1.1, radius * self.MENU_ICON_STROKE_RATIO))
+        pen = QPen(color, self.MENU_COMMON_STROKE_WIDTH)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -775,10 +780,8 @@ class FloatingOrb(QWidget):
             QPointF(node_center.x() - inset, node_center.y() + inset),
         )
 
-    def _menu_icon_color(self) -> QColor:
-        if self._theme.name == "APPLE":
-            return QColor("#555555")
-        return QColor("#DCE2E8")
+    def _menu_icon_color(self, role: str) -> QColor:
+        return QColor("#2A2A2F")
 
     def _update_menu_hover_state(self, local_pos: QPoint | None = None):
         if not self._menu_visual_active():
