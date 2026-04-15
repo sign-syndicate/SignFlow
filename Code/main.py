@@ -27,13 +27,11 @@ def main():
     def _on_selection_cancelled():
         if config.debug:
             print("selection cancelled")
-        selector["widget"] = None
 
     def _on_roi_confirmed(x: int, y: int, w: int, h: int):
         if config.debug:
             print(f"stored roi: {x}, {y}, {w}, {h}")
         orb.on_roi_confirmed(x, y, w, h)
-        selector["widget"] = None
 
     def _get_or_create_overlay():
         active = selector["widget"]
@@ -57,6 +55,10 @@ def main():
 
     orb.activated.connect(_open_selector_overlay)
     orb.show()
+
+    # Pre-warm the fullscreen translucent ROI overlay once so first open is instant.
+    warm_overlay = _get_or_create_overlay()
+    QTimer.singleShot(0, warm_overlay.prime)
 
     app._signflow_orb = orb
     app._signflow_tray = tray
