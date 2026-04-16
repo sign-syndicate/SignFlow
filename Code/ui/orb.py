@@ -266,16 +266,6 @@ class FloatingOrb(QWidget):
     def setPanelMorph(self, value: float):
         self._panel_morph = max(0.0, min(1.0, float(value)))
         self._sync_panel_geometry_from_morph()
-        if (
-            self._presentation_state == ORB_PRESENTATION_DEFAULTS.state_transition_to_orb
-            and self._panel_morph <= 0.001
-        ):
-            self._on_panel_morph_finished()
-        elif (
-            self._presentation_state == ORB_PRESENTATION_DEFAULTS.state_transition_to_panel
-            and self._panel_morph >= 0.999
-        ):
-            self._on_panel_morph_finished()
         self.update()
 
     panelMorph = pyqtProperty(float, fget=getPanelMorph, fset=setPanelMorph)
@@ -348,12 +338,37 @@ class FloatingOrb(QWidget):
         self._panel_press_global = QPoint()
         self._panel_press_window_pos = QPoint()
         self._stop_snap_animation()
+        self._stop_dock_animation()
+        self._capture_orb_restore_geometry_from_panel_anchor()
 
         self._presentation_state = ORB_PRESENTATION_DEFAULTS.state_transition_to_orb
         self._panel_morph_animation.stop()
         self._panel_morph_animation.setStartValue(self._panel_morph)
         self._panel_morph_animation.setEndValue(0.0)
         self._panel_morph_animation.start()
+
+    def _capture_orb_restore_geometry_from_panel_anchor(self):
+        overhang = self._panel_edge_overhang()
+        if self._dock_side == ORB_PRESENTATION_DEFAULTS.edge_right:
+            orb_center_x = self._panel_anchor_edge_x - overhang
+        else:
+            orb_center_x = self._panel_anchor_edge_x + overhang
+
+        orb_center_y = self._panel_anchor_center_y
+        screen_point = QPoint(int(round(orb_center_x)), int(round(orb_center_y)))
+        screen = self._screen_for_point(screen_point)
+
+        target_x = int(round(orb_center_x - (self.WIDGET_DIAMETER * 0.5)))
+        target_y = int(round(orb_center_y - (self.WIDGET_DIAMETER * 0.5)))
+        if screen is not None:
+            target_y = self._clamp_y(target_y, screen.availableGeometry())
+
+        self._orb_restore_geometry = QRectF(
+            float(target_x),
+            float(target_y),
+            float(self.WIDGET_DIAMETER),
+            float(self.WIDGET_DIAMETER),
+        ).toRect()
 
     def update_caption(self, text: str):
         safe_text = str(text).strip() if text is not None else ""
@@ -902,8 +917,9 @@ class FloatingOrb(QWidget):
     def _restore_orb_canvas_geometry(self):
         if self._orb_restore_geometry is not None:
             self.setGeometry(self._orb_restore_geometry)
+            self._orb_restore_geometry = None
         else:
-            center_point = self.rect().center()
+            center_point = self.mapToGlobal(self.rect().center())
             target_x = int(round(center_point.x() - (self.WIDGET_DIAMETER * 0.5)))
             target_y = int(round(center_point.y() - (self.WIDGET_DIAMETER * 0.5)))
             self.setGeometry(target_x, target_y, self.WIDGET_DIAMETER, self.WIDGET_DIAMETER)
